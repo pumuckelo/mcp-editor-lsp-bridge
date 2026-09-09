@@ -146,7 +146,7 @@ Closing Zed disconnects its companion, **not** the standalone analyzer. Disconne
 Standalone operation reads saved files. To include unsaved buffers:
 
 1. Install the executables above.
-2. In Zed, run **zed: install dev extension** and select this repository's `zed-extension` directory. If required, install its build target with `rustup target add wasm32-wasip1`.
+2. Install Rust via rustup for this optional development-extension build. In Zed, run **zed: install dev extension** and select `~/.local/share/editor-bridge/current/zed-extension` when using the release installer (adjust for `INSTALL_ROOT`). No repository clone is needed. For a source checkout, select its `zed-extension` directory instead. Let Zed build the extension in its required WebAssembly format; do not overwrite `extension.wasm` with a raw Cargo build artifact.
 3. Add the companion alongside your existing servers in Zed settings:
 
 ```json
@@ -175,7 +175,7 @@ If Zed cannot find the executable on its PATH, add an absolute binary path, repl
 }
 ```
 
-Open the actual workspace root in Zed and restart language servers after changing settings. Reload/reinstall the dev extension after updating its manifest. The dashboard shows **Zed · Connected** when registered.
+Open the actual workspace root in Zed and restart language servers after changing settings. Reload/reinstall the dev extension after updating its manifest. Run `bridge workspace-status` and verify `companionConnected: true`; analyzer readiness alone does not verify the companion. The dashboard shows **Zed companion connected** when registered. To verify unsaved-buffer forwarding, edit a supported file without saving and inspect `bridge workspace-status --verbose` for that document with `source: "zed"`, then run `bridge diagnostics`.
 
 Zed retains its own analyzer. The companion only forwards open/change/save/close events and snapshots; it does not analyze or index code. The bridge runs its dedicated analyzer, so there are two analyzers, not a proxy or a third analyzer. One companion per workspace is supported; VS Code integration and companion switching are not implemented.
 
