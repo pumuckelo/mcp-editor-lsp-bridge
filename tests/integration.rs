@@ -234,7 +234,7 @@ async fn real_workspace_mcp_and_companion() -> Result<()> {
         &[
             "rename",
             "--json",
-            &json!({"path":"src/helper.rs","line":0,"character":8,"new_name":"preview_only"})
+            &json!({"path":"src/helper.rs","line":0,"character":8,"new_name":"preview_only","preview":true})
                 .to_string(),
         ],
     )
@@ -294,6 +294,56 @@ async fn real_workspace_mcp_and_companion() -> Result<()> {
         "rename", "--json", &json!({"path":"src/helper.rs","line":0,"character":8,"new_name":"result","apply":true}).to_string(),
     ]).await?;
     assert_eq!(restored["applied"], true, "{restored}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/helper.rs"))?,
+        before_helper
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/lib.rs"))?,
+        before_lib
+    );
+    // Rust symbol selection and a preview produced by CLI then applied through MCP.
+    let planned = cli_call(
+        &root,
+        &base,
+        &[
+            "rename",
+            "--path",
+            "src/helper.rs",
+            "--symbol",
+            "result",
+            "--new-name",
+            "planned_result",
+            "--preview",
+        ],
+    )
+    .await?;
+    assert_eq!(planned["applied"], false);
+    assert_eq!(planned["fileCount"], 2);
+    assert!(std::fs::read_to_string(root.join("src/helper.rs"))?.contains("fn result"));
+    let applied = mcp_call(
+        &endpoint,
+        "apply_rename",
+        json!({"workspace":root_str,"plan_id":planned["planId"]}),
+    )
+    .await?;
+    assert_eq!(applied["applied"], true);
+    assert!(std::fs::read_to_string(root.join("src/lib.rs"))?.contains("planned_result"));
+    let restored = cli_call(
+        &root,
+        &base,
+        &[
+            "rename",
+            "--path",
+            "src/helper.rs",
+            "--symbol",
+            "planned_result",
+            "--new-name",
+            "result",
+        ],
+    )
+    .await?;
+    assert_eq!(restored["applied"], true);
     assert_eq!(
         std::fs::read_to_string(root.join("src/helper.rs"))?,
         before_helper
@@ -473,6 +523,83 @@ async fn real_workspace_mcp_and_companion() -> Result<()> {
     let second_workspace = core.workspace(second.path().to_str().unwrap()).await?;
     assert!(!Arc::ptr_eq(&workspace, &second_workspace));
     assert_ne!(workspace.lsp.pid().await, second_workspace.lsp.pid().await);
+    // Stopping one workspace leaves other analyzers alive and blocks automatic reattachment.
+    let old_pid = workspace.lsp.pid().await;
+    let disconnected = cli_call(&root, &base, &["workspace-disconnect"]).await?;
+    assert_eq!(disconnected["connected"], false);
+    assert_eq!(workspace.lsp.pid().await, None);
+    assert!(workspace.open("src/lib.rs").await.is_err());
+    assert!(core.workspace(root_str).await.is_err());
+    assert!(second_workspace.lsp.pid().await.is_some());
+    let status = cli_call(&root, &base, &["workspace-status", "--all"]).await?;
+    assert_eq!(status["workspaces"].as_array().unwrap().len(), 1);
+    assert!(
+        status["disconnectedWorkspaces"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(root_str))
+    );
+    for _ in 0..3 {
+        let reconnect = reqwest::Client::new()
+            .post(format!("{base}/api/companion"))
+            .json(&event(root_str, "connect", None, None, 0))
+            .send()
+            .await?;
+        assert_eq!(reconnect.status(), 400);
+    }
+    assert!(core.workspace(root_str).await.is_err());
+    let resumed = cli_call(&root, &base, &["workspace-connect"]).await?;
+    assert_ne!(resumed["analyzerPid"], json!(old_pid));
+    let resumed_workspace = core.workspace(root_str).await?;
+    wait_ready(&resumed_workspace).await?;
+    assert!(
+        cli_call(&root, &base, &["document-symbols", "--path", "src/lib.rs"])
+            .await?
+            .to_string()
+            .contains("agent_wins")
+    );
+    let reconnected = reqwest::Client::new()
+        .post(format!("{base}/api/companion"))
+        .json(&event(root_str, "connect", None, None, 0))
+        .send()
+        .await?;
+    assert!(reconnected.status().is_success());
+    // A running Cargo check and its build-script child must stop as well.
+    std::fs::write(
+        second.path().join("build.rs"),
+        r#"fn main() {
+        std::fs::write("check-started", std::process::id().to_string()).unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    }"#,
+    )?;
+    second_workspace
+        .disk_changed(&second.path().join("build.rs"))
+        .await?;
+    let checking = second_workspace.clone();
+    let check = tokio::spawn(async move { checking.check().await });
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !second.path().join("check-started").exists() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await?;
+    let child_pid: i32 = std::fs::read_to_string(second.path().join("check-started"))?.parse()?;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        core.disconnect(second.path().to_str().unwrap()),
+    )
+    .await??;
+    tokio::time::timeout(Duration::from_secs(5), check).await???;
+    assert_eq!(second_workspace.status().await["check"]["running"], false);
+    assert_eq!(second_workspace.lsp.pid().await, None);
+    #[cfg(unix)]
+    tokio::time::timeout(Duration::from_secs(5), async {
+        // SAFETY: signal 0 only checks whether the observed test child exists.
+        while unsafe { libc::kill(child_pid, 0) } == 0 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await?;
     handle.abort();
     core.shutdown().await;
     Ok(())

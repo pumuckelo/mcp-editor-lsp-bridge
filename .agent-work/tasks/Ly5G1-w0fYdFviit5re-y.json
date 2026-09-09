@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "Ly5G1-w0fYdFviit5re-y",
+  "title": "Add explicit workspace connect and disconnect controls",
+  "description": "UI and CLI lifecycle controls stop analyzers, watchers and checks; suppress automatic companion/query reattachment until explicit reconnect. Verify isolation and real subprocess cancellation.",
+  "stage": "reviewing",
+  "status": "done",
+  "revision": 3,
+  "createdAt": "2026-09-09T06:59:57.111Z",
+  "updatedAt": "2026-09-09T07:03:38.734Z",
+  "todos": [
+    {
+      "id": "lFFmpL7ogUcspr4GHisRI",
+      "title": "Implement and validate workspace lifecycle controls",
+      "status": "done"
+    },
+    {
+      "id": "idcE-afG8vI1zngeQ6SdQ",
+      "title": "Install release and verify dashboard controls",
+      "status": "done"
+    }
+  ],
+  "findings": [],
+  "notes": [
+    {
+      "id": "RzwXwvl_k0f_0dVS98Ry7",
+      "text": "Lifecycle controls and blocked auto-reattachment implemented. Real analyzer integration passed including separate workspace isolation, CLI reconnect, repeated companion requests, and cancellation of an active Cargo check plus build-script child. Finishing UI verification and release installation.",
+      "createdAt": "2026-09-09T07:00:40.185Z"
+    },
+    {
+      "id": "sTu3Shk9HLc0E236elldu",
+      "text": "Release installed and running. Browser UI verified demo disconnect moves it to stopped list; reconnect creates a new PID while other workspace PIDs remain unchanged. Updated CLI skill and documentation. Full tests, real-analyzer integration including Cargo/build-script cancellation, Clippy and formatting passed. Disconnected choices reset on core restart.",
+      "createdAt": "2026-09-09T07:03:38.734Z"
+    }
+  ],
+  "history": [
+    {
+      "id": "OqTJpz0_QnKT3H550RFq_",
+      "revision": 1,
+      "at": "2026-09-09T06:59:57.111Z",
+      "changes": [
+        "Task created"
+      ]
+    },
+    {
+      "id": "m89LfUvcb9mENL28_juoE",
+      "revision": 2,
+      "at": "2026-09-09T07:00:40.185Z",
+      "changes": [
+        "Status: active",
+        "Stage: reviewing",
+        "Todo completed: Implement and validate workspace lifecycle controls",
+        "Progress note added"
+      ]
+    },
+    {
+      "id": "8RppIo_ZwYMfJrRjcffwU",
+      "revision": 3,
+      "at": "2026-09-09T07:03:38.734Z",
+      "changes": [
+        "Todo completed: Install release and verify dashboard controls",
+        "Progress note added",
+        "Status: done"
+      ]
+    }
+  ]
+}

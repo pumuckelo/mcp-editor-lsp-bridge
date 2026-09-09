@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "id": "vkEZbKiVfiZmwgY1Auv9u",
+  "title": "Add native TypeScript 7 language support",
+  "description": "Add a language adapter, TypeScript workspace and companion support, and verify real CLI navigation, rename and diagnostics. Use the Rust bridge during implementation and record observed friction.",
+  "stage": "reviewing",
+  "status": "done",
+  "revision": 4,
+  "createdAt": "2026-09-09T07:44:19.048Z",
+  "updatedAt": "2026-09-09T07:59:20.366Z",
+  "todos": [
+    {
+      "id": "o15ophdKn6uMbDNx0XTn6",
+      "title": "Verify native TypeScript 7 server and implement language routing",
+      "status": "done"
+    },
+    {
+      "id": "8LmjKyk090R8XapZurf8y",
+      "title": "Extend CLI, Zed companion and workspace UI",
+      "status": "done"
+    },
+    {
+      "id": "j2biaTHJ7gnHrcDSgQMA8",
+      "title": "Test real Rust and TypeScript flows and document observed bridge improvements",
+      "status": "done"
+    }
+  ],
+  "findings": [],
+  "notes": [
+    {
+      "id": "rmMf7Fl19CvNXXC6VXdfq",
+      "text": "Implemented native TypeScript 7 adapter, mixed-workspace routing, pull diagnostics, shared saved-file checks, CLI inference and Zed language declarations. Full suite passes: 3 unit, 2 CLI, real Rust integration, real TypeScript integration. Used running Rust bridge for symbols, references and cached compiler diagnostics; recorded misleading localhost error wording for follow-up.",
+      "createdAt": "2026-09-09T07:53:28.654Z"
+    },
+    {
+      "id": "pt18HnK4JcSkWfY3oCCRn",
+      "text": "notes from another agent:\n\nUser:\nOkay, based on your usage of this tool, do you think the preview is even necessary? I think for renames we could do it directly as well, right? Does the if you do the rename via the bridge, does it return what it has edited or not? Because if it does return then I think it might be fine to not use the preview because after editing you already get the information what you have edited. And And for the other bridge commands, do you have any anything that wasn't well, anything that you think consumed too many tokens? Anything that we could improve because we are actually the um developer of this bridge. We did it as a tool to help our development so we can improve it.\n\n\nAgent response:\nFor straightforward renames, I don’t think a separate preview is necessary. The rename is reversible, Rust Analyzer resolves the symbol semantically, and we verify afterward with diagnostics.\n\nCurrently, however, `--apply` returns only:\n\n```json\n{\n  \"applied\": true,\n  \"files\": [\n    \".../in_process.rs\",\n    \".../trader_gateway_service.rs\",\n    \".../trading_runtime_service.rs\"\n  ]\n}\n```\n\nIt does **not** return the individual edits, ranges, or number of references. That information only appeared in the preview response. I’d change `--apply` to return a compact edit summary:\n\n```json\n{\n  \"applied\": true,\n  \"symbol\": \"exit_position\",\n  \"newName\": \"exit_position_rename_test\",\n  \"editCount\": 5,\n  \"files\": [\n    {\n      \"path\": \"trader-gateway/src/adapters/outbound/trading_runtime_service/in_process.rs\",\n      \"editCount\": 2,\n      \"lines\": [60, 380]\n    },\n    {\n      \"path\": \"trader-gateway/src/application/trader_gateway_service.rs\",\n      \"editCount\": 2,\n      \"lines\": [50, 127]\n    },\n    {\n      \"path\": \"trader-gateway/src/ports/outbound/trading_runtime_service.rs\",\n      \"editCount\": 1,\n      \"lines\": [28]\n    }\n  ]\n}\n```\n\nThen I would directly use `rename --apply` for normal renames. Preview would remain useful for risky or unusually broad renames.\n\nA better preview workflow would return a plan ID:\n\n```text\nbridge rename ...                 → preview + plan ID\nbridge apply-rename --plan ID     → applies exactly that preview\n```\n\nThe core should verify document versions or hashes before applying. Currently previewing and applying calculates the rename twice, takes roughly twice as long, and lacks stale-version protection.\n\nThe biggest issues I noticed:\n\n- **Connection errors hide the real cause.**  \n  `bridge` reported generic `UNAVAILABLE`, but the real error was `Operation not permitted` from sandboxed loopback access. Preserve and classify the underlying cause:\n  - connection refused → core likely stopped\n  - permission denied → sandbox/network policy\n  - timeout → core unavailable or stalled\n\n- **Diagnostics output is much too verbose when clean.**  \n  It returned an entry for every open Rust document, each repeating URI, version, and an empty diagnostics array. A clean default could be:\n\n  ```json\n  {\n    \"ready\": true,\n    \"checkFresh\": true,\n    \"checkSuccess\": true,\n    \"diagnosticCount\": 0,\n    \"generation\": 17\n  }\n  ```\n\n  Return document details only for nonempty diagnostics. Flags such as `--verbose`, `--include-clean-files`, or `--live-details` could expose the complete response.\n\n- **`workspace-status --all` is similarly verbose.**  \n  A compact default could provide workspace path, readiness, analyzer PID, saved-check status, generation, and document count. Listing every document should require `--documents` or `--verbose`.\n\n- **Positions are error-prone for CLI use.**  \n  Zero-based UTF-16 positions match LSP but are awkward for humans reading editor line numbers. Consider supporting:\n\n  ```bash\n  bridge rename --path ... --position 60:14 --new-name ...\n  ```\n\n  with conventional one-based positions, while JSON continues using native LSP coordinates.\n\n- **Symbol-based selection could help.**  \n  Something like:\n\n  ```bash\n  bridge rename --path ... --symbol exit_position --new-name ...\n  ```\n\n  If ambiguous, it could return candidate positions instead of guessing.\n\nOne thing worked particularly well: the semantic rename correctly changed the gateway trait and its implementations while leaving the identically named broker-service trait method untouched. That is exactly the value this bridge should provide.\n\nI’ve only exercised `workspace-status`, `rename`, and `diagnostics` so far, so I don’t yet have grounded feedback on definitions, references, hover, or code actions.\n\nUser:\n**Positions are error-prone for CLI use.**  \n  Zero-based UTF-16 positions match LSP but are awkward for humans reading editor line numbers. Consider supporting: the human isnt using this tool so if zero based works well for you agents we can keep it. if your suggestion would even be betterr for you as agents s, sure we can do it\n\n\n\nAgent response:\n\nKeep zero-based UTF-16 positions. They are better for agents because they match the LSP protocol directly and avoid conversion ambiguity.\n\nMy suggestion was based on human CLI ergonomics, which does not matter if agents are the intended users. Adding one-based positions would create two coordinate systems and increase the chance of off-by-one errors.\n\nA more useful agent-focused improvement would be symbol selection:\n\n```bash\nbridge rename \\\n  --path trader-gateway/src/.../in_process.rs \\\n  --symbol exit_position \\\n  --new-name exit_position_rename_test\n```\n\nWhen multiple symbols match, return compact candidates with their zero-based LSP positions. Agents can then retry using the exact position. Keep `--line` and `--character` zero-based as the unambiguous underlying interface.",
+      "createdAt": "2026-09-09T07:57:53.766Z"
+    },
+    {
+      "id": "7Skqtel6azsXVDo-JFEjC",
+      "text": "Final verification: complete 7-test suite passed, including real Rust and native TypeScript integrations; formatting, Clippy, release and WASM builds passed. Used bridge semantic rename on the Rust helper and checked diagnostics afterward. Installed binaries and refreshed core, preserving demo disconnect. Installed CLI queried SDS TypeScript symbols and passed a fresh native compiler check; dashboard shows its TypeScript PID. Linked Codex/Pi skill updated; Zed TS/TSX/JavaScript settings and compiled extension updated. User needs zed: reload extensions because automated native command-palette shortcut did not work. Companion executable protocol is verified; live Zed TypeScript smoke test remains manual. Read and preserved the additional agent feedback: compact output, rename edit summaries, preview plan protection, actionable connection errors and symbol selection are follow-up improvements, not part of this completed TypeScript feature.",
+      "createdAt": "2026-09-09T07:59:20.366Z"
+    }
+  ],
+  "history": [
+    {
+      "id": "gw4I-TBR84acfcisfuBxH",
+      "revision": 1,
+      "at": "2026-09-09T07:44:19.048Z",
+      "changes": [
+        "Task created"
+      ]
+    },
+    {
+      "id": "uig0c1QxHQ6J5JslYX8qi",
+      "revision": 2,
+      "at": "2026-09-09T07:53:28.654Z",
+      "changes": [
+        "Status: active",
+        "Stage: reviewing",
+        "Todo completed: Verify native TypeScript 7 server and implement language routing",
+        "Todo completed: Extend CLI, Zed companion and workspace UI",
+        "Progress note added"
+      ]
+    },
+    {
+      "id": "uDWoeCG0H1RK0lqQV3cHG",
+      "revision": 3,
+      "at": "2026-09-09T07:57:53.766Z",
+      "changes": [
+        "Progress note added"
+      ]
+    },
+    {
+      "id": "quGDzLb_XvrDStmd2o0xw",
+      "revision": 4,
+      "at": "2026-09-09T07:59:20.366Z",
+      "changes": [
+        "Todo completed: Test real Rust and TypeScript flows and document observed bridge improvements",
+        "Progress note added",
+        "Status: done"
+      ]
+    }
+  ]
+}

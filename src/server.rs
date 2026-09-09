@@ -97,7 +97,7 @@ async fn status(State(core): State<Arc<Core>>) -> Json<Value> {
 }
 async fn attach(State(core): State<Arc<Core>>, Json(value): Json<Value>) -> Response {
     match core
-        .workspace(value["workspace"].as_str().unwrap_or(""))
+        .connect(value["workspace"].as_str().unwrap_or(""))
         .await
     {
         Ok(w) => Json(w.status().await).into_response(),

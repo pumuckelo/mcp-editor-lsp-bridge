@@ -27,3 +27,27 @@ The extension has been compiled for `wasm32-wasip1`. Native Zed UI automation co
 ### CLI rename apply verification — 2026-09-09
 
 Extended the real-analyzer integration test to invoke the CLI executable with `rename --apply`: renamed `result` to `cli_renamed_result`, asserted exact definition and call-site changes in `src/helper.rs` and `src/lib.rs`, confirmed CLI references included both files, and awaited a successful compiler check via `diagnostics --check`. Renamed back using CLI JSON input with `apply: true` and verified both files matched their original contents exactly. The complete integration test passed (13.11s), as did Clippy with warnings denied. All mutations ran in a temporary fixture workspace cleaned up by the test.
+
+### Workspace lifecycle controls
+
+Real-analyzer integration passed explicit CLI disconnect/reconnect, rejection of repeated companion reattachment attempts while stopped, isolation of another workspace, and cancellation of a running Cargo check plus its build-script child. Full unit/CLI tests, Clippy with warnings denied, formatting, release build and installation passed. Dashboard buttons were exercised against the demo: Disconnect removed its active analyzer card and showed Reconnect; reconnect created a new analyzer PID while the other workspaces retained their PIDs. The existing dashboard tab was refreshed. Disconnect choices are in-memory and reset on core restart.
+
+### Native TypeScript 7 support
+
+The native TypeScript 7.0.2 integration exercised the real CLI and companion executable: workspace inference, symbols, hover, definitions, references, rename preview and cross-file apply, TSX/JSX files, code-action discovery, unsaved buffer diagnostics, disk-over-overlay precedence, saved-file error/fix checks, and mixed-language shutdown/reconnect. Existing real Rust integration also passed. Protocol tests are not a claim that Zed's updated development-extension manifest has been reloaded in the user's editor.
+
+During implementation the running Rust bridge was used for semantic symbols/references, a real helper rename, and shared compiler diagnostics. Follow-up observations:
+
+- The connection error suggests starting a core even when sandbox localhost access is the cause. Preserve and explain the underlying network error before suggesting startup.
+- Document-symbol output is verbose and supplies whole declaration ranges, making exact rename positions awkward. Optional compact output and selection ranges would reduce agent work.
+- Existing stale-edit/transactional protection and command-based code actions remain future work; they were not expanded in this language-support change.
+
+The TypeScript launcher can wrap a native child; this change stops owned process groups so workspace disconnect does not leave that child running.
+
+### Agent workflow improvements (0.2)
+
+The full 11-test suite passed: six unit tests, two CLI transport tests, and real Rust, native TypeScript, and guarded-refactoring integrations. Coverage includes default-apply rename by symbol, compact and verbose receipts, relative file paths, exact CLI-preview/MCP-apply reuse, preserved unrelated declarations, ambiguity without mutation, changed unopened files, new files, unsaved overlays, stale LSP versions, and concurrent single-use plan application. Unit tests cover error classification, diagnostic uncertainty, unsupported resource edits, duplicate document groups and staging failure cleanup. Formatting and Clippy with warnings denied passed.
+
+The running Rust bridge was used for semantic navigation, compiler diagnostics and a real cross-file helper rename during implementation. Closed-file snapshot differences are forwarded before requesting edits so delayed watcher events do not leave the server reading an old file.
+
+Refactor guards serialize bridge/editor events and reject observed changes. They do not claim a multi-file OS transaction against other processes; a final external write race or filesystem replacement failure remains possible and is documented.

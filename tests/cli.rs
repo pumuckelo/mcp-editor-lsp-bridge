@@ -166,7 +166,7 @@ async fn client_infers_cargo_workspace_and_preserves_json_and_stdin() -> Result<
     );
     assert_eq!(
         explicit["arguments"],
-        json!({"workspace":root,"check":true})
+        json!({"workspace":root,"check":true,"verbose":null})
     );
     server.abort();
     let unavailable = cli(&cwd, &["diagnostics", "--endpoint", &endpoint], None).await?;
@@ -174,7 +174,7 @@ async fn client_infers_cargo_workspace_and_preserves_json_and_stdin() -> Result<
     assert!(unavailable.stdout.is_empty());
     assert_eq!(
         serde_json::from_slice::<Value>(&unavailable.stderr)?["error"]["code"],
-        "UNAVAILABLE"
+        "CONNECTION_REFUSED"
     );
     Ok(())
 }

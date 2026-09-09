@@ -1,10 +1,14 @@
-use crate::{lsp::Lsp, protocol::edit_text};
+use crate::{
+    language::{Language, verify_typescript},
+    lsp::Lsp,
+    protocol::edit_text,
+};
 use anyhow::{Context, Result, bail};
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -19,6 +23,8 @@ use tokio::{
 #[serde(default)]
 pub struct Config {
     pub analyzer: String,
+    pub typescript_analyzer: Option<String>,
+    pub typescript_settings: Value,
     pub analyzer_settings: Value,
     pub environment: HashMap<String, String>,
     pub cargo_features: Vec<String>,
@@ -30,6 +36,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             analyzer: "rust-analyzer".into(),
+            typescript_analyzer: None,
+            typescript_settings: json!({}),
             analyzer_settings: json!({}),
             environment: HashMap::new(),
             cargo_features: vec![],
@@ -42,29 +50,57 @@ impl Default for Config {
 pub struct Core {
     pub sessions: Mutex<BTreeMap<PathBuf, Arc<Workspace>>>,
     pub config: Config,
+    disconnected: Mutex<BTreeSet<PathBuf>>,
+    lifecycle: Mutex<()>,
 }
 impl Core {
     pub fn new(config: Config) -> Arc<Self> {
         Arc::new(Self {
             sessions: Mutex::new(BTreeMap::new()),
             config,
+            disconnected: Mutex::new(BTreeSet::new()),
+            lifecycle: Mutex::new(()),
         })
     }
     pub async fn workspace(&self, path: &str) -> Result<Arc<Workspace>> {
+        self.attach(path, false).await
+    }
+    pub async fn connect(&self, path: &str) -> Result<Arc<Workspace>> {
+        self.attach(path, true).await
+    }
+    async fn attach(&self, path: &str, explicit: bool) -> Result<Arc<Workspace>> {
+        let _lifecycle = self.lifecycle.lock().await;
         if !Path::new(path).is_absolute() {
             bail!("Workspace must be an absolute directory path");
         }
         let root = std::fs::canonicalize(path).context("Workspace directory does not exist")?;
-        if !root.join("Cargo.toml").is_file() {
-            bail!("Workspace must contain Cargo.toml");
+        Language::default_for(&root)?;
+        if !explicit && self.disconnected.lock().await.contains(&root) {
+            bail!(
+                "Workspace disconnected; reconnect explicitly with bridge workspace-connect --workspace {}",
+                root.display()
+            );
         }
         let mut sessions = self.sessions.lock().await;
         if let Some(workspace) = sessions.get(&root) {
             return Ok(workspace.clone());
         }
         let workspace = Workspace::start(root.clone(), self.config.clone()).await?;
+        self.disconnected.lock().await.remove(&root);
         sessions.insert(root, workspace.clone());
         Ok(workspace)
+    }
+    pub async fn disconnect(&self, path: &str) -> Result<Value> {
+        let _lifecycle = self.lifecycle.lock().await;
+        if !Path::new(path).is_absolute() {
+            bail!("Workspace must be an absolute directory path");
+        }
+        let root = std::fs::canonicalize(path).context("Workspace directory does not exist")?;
+        self.disconnected.lock().await.insert(root.clone());
+        if let Some(workspace) = self.sessions.lock().await.remove(&root) {
+            workspace.stop().await;
+        }
+        Ok(json!({"workspace":root,"connected":false}))
     }
     pub async fn status(&self) -> Value {
         let sessions: Vec<_> = self.sessions.lock().await.values().cloned().collect();
@@ -72,11 +108,11 @@ impl Core {
         for workspace in sessions {
             items.push(workspace.status().await);
         }
-        json!({"workspaces":items})
+        json!({"workspaces":items,"disconnectedWorkspaces":self.disconnected.lock().await.iter().collect::<Vec<_>>()})
     }
     pub async fn shutdown(&self) {
         for session in self.sessions.lock().await.values() {
-            session.lsp.stop().await;
+            session.stop().await;
         }
     }
 }
@@ -98,6 +134,7 @@ struct CheckState {
 struct State {
     documents: HashMap<String, Document>,
     disk_hashes: HashMap<String, u64>,
+    refactor_disk: BTreeMap<PathBuf, u64>,
     generation: u64,
     companion: Option<String>,
     companion_seen: std::time::Instant,
@@ -106,38 +143,37 @@ struct State {
 }
 pub struct Workspace {
     instance: String,
+    stopped: tokio::sync::watch::Sender<bool>,
     pub root: PathBuf,
     pub lsp: Arc<Lsp>,
+    pub language: Language,
+    servers: Mutex<BTreeMap<Language, Arc<Lsp>>>,
     pub config: Config,
     state: Mutex<State>,
     check_lock: Mutex<()>,
+    pub edit_lock: Mutex<()>,
     _watcher: std::sync::Mutex<Option<notify::RecommendedWatcher>>,
 }
 impl Workspace {
     async fn start(root: PathBuf, config: Config) -> Result<Arc<Self>> {
-        let mut settings = config.analyzer_settings.clone();
-        if !settings.is_object() {
-            bail!("analyzer_settings must be an object");
+        let language = Language::default_for(&root)?;
+        let spec = language.spec(&root, &config)?;
+        if language == Language::TypeScript {
+            verify_typescript(&spec.command, &root, &config).await?;
         }
-        settings["checkOnSave"] = json!(false);
-        settings["cargo"]["features"] = if config.all_features {
-            json!("all")
-        } else {
-            json!(config.cargo_features)
-        };
-        settings["cargo"]["noDefaultFeatures"] = json!(config.no_default_features);
-        if let Some(target) = &config.cargo_target {
-            settings["cargo"]["target"] = json!(target);
-        }
-        let lsp = Lsp::start(&root, &config.analyzer, settings, &config.environment).await?;
+        let lsp = Lsp::start(&root, spec, &config.environment).await?;
         let workspace = Arc::new(Self {
             instance: uuid::Uuid::new_v4().to_string(),
+            stopped: tokio::sync::watch::channel(false).0,
             root: root.clone(),
-            lsp,
+            lsp: lsp.clone(),
+            language,
+            servers: Mutex::new(BTreeMap::from([(language, lsp)])),
             config,
             state: Mutex::new(State {
                 documents: HashMap::new(),
                 disk_hashes: HashMap::new(),
+                refactor_disk: BTreeMap::new(),
                 generation: 0,
                 companion: None,
                 companion_seen: std::time::Instant::now(),
@@ -145,6 +181,7 @@ impl Workspace {
                 watcher_error: None,
             }),
             check_lock: Mutex::new(()),
+            edit_lock: Mutex::new(()),
             _watcher: std::sync::Mutex::new(None),
         });
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -154,8 +191,10 @@ impl Workspace {
         watcher.watch(&root, RecursiveMode::Recursive)?;
         *workspace._watcher.lock().unwrap() = Some(watcher);
         let weak = Arc::downgrade(&workspace);
+        let mut stopped = workspace.stopped.subscribe();
         tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
+            loop {
+                let event = tokio::select! { biased; _ = stopped.changed() => break, event = rx.recv() => match event { Some(event) => event, None => break } };
                 let Some(workspace) = weak.upgrade() else {
                     break;
                 };
@@ -186,12 +225,14 @@ impl Workspace {
             }
         });
         let weak = Arc::downgrade(&workspace);
+        let mut stopped = workspace.stopped.subscribe();
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                tokio::select! { biased; _ = stopped.changed() => break, _ = tokio::time::sleep(Duration::from_secs(5)) => {} }
                 let Some(workspace) = weak.upgrade() else {
                     break;
                 };
+                let _edit = workspace.edit_lock.lock().await;
                 let mut state = workspace.state.lock().await;
                 if state.companion.is_some()
                     && state.companion_seen.elapsed() > Duration::from_secs(15)
@@ -203,11 +244,67 @@ impl Workspace {
         workspace.schedule_check().await;
         Ok(workspace)
     }
+    pub async fn language_server(&self, input: &str) -> Result<Arc<Lsp>> {
+        let language = Language::for_path(&self.path(input)?)?;
+        let mut servers = self.servers.lock().await;
+        self.ensure_running()?;
+        if let Some(server) = servers.get(&language) {
+            return Ok(server.clone());
+        }
+        let spec = language.spec(&self.root, &self.config)?;
+        if language == Language::TypeScript {
+            verify_typescript(&spec.command, &self.root, &self.config).await?;
+        }
+        let server = Lsp::start(&self.root, spec, &self.config.environment).await?;
+        servers.insert(language, server.clone());
+        drop(servers);
+        self.state.lock().await.generation += 1;
+        Ok(server)
+    }
+    async fn existing_server(&self, uri: &str) -> Result<Arc<Lsp>> {
+        // Document operations call language_server before taking the document lock.
+        let language = Language::for_path(&self.path(uri)?)?;
+        self.servers
+            .lock()
+            .await
+            .get(&language)
+            .cloned()
+            .context("Language server not started")
+    }
+    pub async fn workspace_symbols(&self, query: &str) -> Result<Value> {
+        let servers: Vec<_> = self.servers.lock().await.values().cloned().collect();
+        let mut symbols = vec![];
+        for server in servers {
+            let result = server
+                .request("workspace/symbol", json!({"query":query}))
+                .await?;
+            symbols.extend(result.as_array().cloned().unwrap_or_default());
+        }
+        Ok(json!(symbols))
+    }
+    fn ensure_running(&self) -> Result<()> {
+        if *self.stopped.borrow() {
+            bail!("Workspace disconnected; reconnect explicitly with bridge workspace-connect");
+        }
+        Ok(())
+    }
+    pub async fn stop(&self) {
+        self.stopped.send_replace(true);
+        self._watcher.lock().unwrap().take();
+        let _check = self.check_lock.lock().await;
+        for server in self.servers.lock().await.values() {
+            server.stop().await;
+        }
+    }
     async fn schedule_check(self: &Arc<Self>) {
+        if self.ensure_running().is_err() {
+            return;
+        }
+        let mut stopped = self.stopped.subscribe();
         let generation = self.state.lock().await.generation;
         let weak = Arc::downgrade(self);
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            tokio::select! { biased; _ = stopped.changed() => return, _ = tokio::time::sleep(Duration::from_millis(500)) => {} }
             if let Some(workspace) = weak.upgrade() {
                 let current = workspace.state.lock().await.generation;
                 if current == generation {
@@ -220,17 +317,26 @@ impl Workspace {
         let Ok(relative) = path.strip_prefix(&self.root) else {
             return false;
         };
-        !relative
-            .components()
-            .any(|p| p.as_os_str() == "target" || p.as_os_str() == ".git")
-            && (path.extension().is_some_and(|x| x == "rs")
-                || path.file_name().is_some_and(|x| {
-                    x == "Cargo.toml"
-                        || x == "Cargo.lock"
-                        || x == "build.rs"
-                        || x == "config.toml"
-                        || x == "rust-toolchain.toml"
-                }))
+        !relative.components().any(|p| {
+            matches!(
+                p.as_os_str().to_str(),
+                Some("target" | ".git" | "node_modules" | "dist" | ".next")
+            )
+        }) && (Language::for_path(path).is_ok()
+            || path.file_name().is_some_and(|x| {
+                x == "tsconfig.json"
+                    || x == "jsconfig.json"
+                    || x == "package.json"
+                    || x == "bun.lock"
+                    || x == "package-lock.json"
+                    || x == "pnpm-lock.yaml"
+                    || x.to_string_lossy().starts_with("tsconfig.")
+                    || x == "Cargo.toml"
+                    || x == "Cargo.lock"
+                    || x == "build.rs"
+                    || x == "config.toml"
+                    || x == "rust-toolchain.toml"
+            }))
     }
     pub fn path(&self, input: &str) -> Result<PathBuf> {
         let path = if input.starts_with("file:") {
@@ -265,20 +371,21 @@ impl Workspace {
         text: String,
         source: &'static str,
     ) -> Result<()> {
+        let lsp = self.existing_server(uri).await?;
         if let Some(doc) = state.documents.get_mut(uri) {
             if doc.text != text {
                 doc.version += 1;
-                self.lsp.notify("textDocument/didChange", json!({"textDocument":{"uri":uri,"version":doc.version},"contentChanges":[{"text":text}]})).await?;
+                lsp.notify("textDocument/didChange", json!({"textDocument":{"uri":uri,"version":doc.version},"contentChanges":[{"text":text}]})).await?;
                 doc.text = text;
-                self.lsp.state.write().await.diagnostics.remove(uri);
+                lsp.state.write().await.diagnostics.remove(uri);
             }
             doc.source = source;
         } else {
             let path = self.path(uri)?;
-            self.lsp
+            lsp
                 .notify(
                     "textDocument/didOpen",
-                    json!({"textDocument":{"uri":uri,"languageId":"rust","version":1,"text":text}}),
+                    json!({"textDocument":{"uri":uri,"languageId":Language::document_id(&path)?,"version":1,"text":text}}),
                 )
                 .await?;
             state.documents.insert(
@@ -295,8 +402,11 @@ impl Workspace {
         Ok(())
     }
     pub async fn open(&self, input: &str) -> Result<String> {
+        self.ensure_running()?;
+        self.language_server(input).await?;
+        let _edit = self.edit_lock.lock().await;
         let path = self.path(input)?;
-        self.disk_changed(&path).await?;
+        self.disk_changed_locked(&path).await?;
         let uri = self.uri(&path)?;
         let mut state = self.state.lock().await;
         if !state.documents.contains_key(&uri) {
@@ -306,7 +416,21 @@ impl Workspace {
         Ok(uri)
     }
     pub async fn disk_changed(&self, path: &Path) -> Result<()> {
+        let _edit = self.edit_lock.lock().await;
+        self.disk_changed_locked(path).await
+    }
+    async fn disk_changed_locked(&self, path: &Path) -> Result<()> {
+        self.ensure_running()?;
         let uri = self.uri(path)?;
+        let server = if Language::for_path(path).is_ok() {
+            self.servers
+                .lock()
+                .await
+                .get(&Language::for_path(path)?)
+                .cloned()
+        } else {
+            None
+        };
         let disk = std::fs::read_to_string(path).ok();
         let mut state = self.state.lock().await;
         use std::hash::{Hash, Hasher};
@@ -318,6 +442,7 @@ impl Workspace {
         }
         state.disk_hashes.insert(uri.clone(), hash);
         if let Some(doc) = state.documents.get_mut(&uri) {
+            let lsp = server.as_ref().context("Missing document server")?;
             if doc.disk == disk {
                 return Ok(());
             }
@@ -327,20 +452,21 @@ impl Workspace {
                 self.set_document(&mut state, &uri, text.clone(), "disk")
                     .await?;
             } else {
-                self.lsp
-                    .notify("textDocument/didClose", json!({"textDocument":{"uri":uri}}))
+                lsp.notify("textDocument/didClose", json!({"textDocument":{"uri":uri}}))
                     .await?;
                 state.documents.remove(&uri);
-                self.lsp.state.write().await.diagnostics.remove(&uri);
+                lsp.state.write().await.diagnostics.remove(&uri);
             }
         }
         state.generation += 1;
-        self.lsp
-            .notify(
+        let servers: Vec<_> = self.servers.lock().await.values().cloned().collect();
+        for lsp in servers {
+            lsp.notify(
                 "workspace/didChangeWatchedFiles",
                 json!({"changes":[{"uri":uri,"type":if disk.is_some(){2}else{3}}]}),
             )
             .await?;
+        }
         Ok(())
     }
     fn public_config(&self) -> Value {
@@ -352,26 +478,70 @@ impl Workspace {
                 .map(|k| (k.clone(), "configured"))
                 .collect::<BTreeMap<_, _>>()
         );
-        value["analyzer_settings"]["checkOnSave"] = json!(false);
+        if self.language == Language::Rust {
+            value["analyzer_settings"]["checkOnSave"] = json!(false);
+        }
         value["compilerChecks"] = json!(
-            "Shared core runs Cargo check after disk changes or explicit diagnostics(check=true)"
+            "Shared core runs Cargo and/or native TypeScript checks for active languages after disk changes or explicit diagnostics(check=true)"
         );
         value
     }
     pub async fn status(&self) -> Value {
-        let state = self.state.lock().await;
-        let analysis = self.lsp.state.read().await;
-        let documents: Vec<_> = state.documents.iter().map(|(uri,doc)| json!({"uri":uri,"source":doc.source,"version":doc.version,"epoch":doc.epoch})).collect();
-        json!({"workspace":self.root,"analyzerPid":self.lsp.pid().await,"ready":analysis.ready,"status":analysis.status,"companion":state.companion,"generation":state.generation,"check":state.check,"checkFresh":state.check.generation == Some(state.generation) && !state.check.running && state.watcher_error.is_none(),"documents":documents,"config":self.public_config(),"watcherError":state.watcher_error})
-    }
-    pub async fn diagnostics(&self, check: bool) -> Result<Value> {
-        if check {
-            self.check().await?;
+        let servers: Vec<_> = self
+            .servers
+            .lock()
+            .await
+            .iter()
+            .map(|(language, server)| (*language, server.clone()))
+            .collect();
+        let mut analyzers = vec![];
+        for (language, server) in servers {
+            let analysis = server.state.read().await;
+            analyzers.push(json!({"language":language,"pid":server.pid().await,"ready":analysis.ready,"status":analysis.status}));
         }
         let state = self.state.lock().await;
         let analysis = self.lsp.state.read().await;
-        let live: BTreeMap<_, _> = analysis
-            .diagnostics
+        let documents: Vec<_> = state.documents.iter().map(|(uri,doc)| json!({"uri":uri,"source":doc.source,"version":doc.version,"epoch":doc.epoch})).collect();
+        json!({"workspace":self.root,"language":self.language,"analyzers":analyzers,"analyzerPid":self.lsp.pid().await,"ready":analyzers.iter().all(|a| a["ready"] == true),"status":analysis.status,"companion":state.companion,"generation":state.generation,"check":state.check,"checkFresh":state.check.generation == Some(state.generation) && !state.check.running && state.watcher_error.is_none(),"documents":documents,"config":self.public_config(),"watcherError":state.watcher_error})
+    }
+    pub async fn diagnostics(&self, check: bool) -> Result<Value> {
+        self.ensure_running()?;
+        if check {
+            self.check().await?;
+        }
+        let documents: Vec<_> = self
+            .state
+            .lock()
+            .await
+            .documents
+            .iter()
+            .map(|(uri, doc)| (uri.clone(), doc.version))
+            .collect();
+        for (uri, version) in documents {
+            let server = self.existing_server(&uri).await?;
+            if !server.capabilities.read().await["diagnosticProvider"].is_null() {
+                let result = server
+                    .request(
+                        "textDocument/diagnostic",
+                        json!({"textDocument":{"uri":uri}}),
+                    )
+                    .await?;
+                if result["kind"] == "full" {
+                    server.state.write().await.diagnostics.insert(
+                        uri.clone(),
+                        json!({"uri":uri,"version":version,"diagnostics":result["items"]}),
+                    );
+                }
+            }
+        }
+        let servers: Vec<_> = self.servers.lock().await.values().cloned().collect();
+        let mut diagnostics = HashMap::new();
+        for server in servers {
+            diagnostics.extend(server.state.read().await.diagnostics.clone());
+        }
+        let state = self.state.lock().await;
+        let analysis = self.lsp.state.read().await;
+        let live: BTreeMap<_, _> = diagnostics
             .iter()
             .map(|(uri, params)| {
                 let mut value = params.clone();
@@ -390,6 +560,8 @@ impl Workspace {
     }
     pub async fn check(&self) -> Result<()> {
         let _guard = self.check_lock.lock().await;
+        let mut stopped = self.stopped.subscribe();
+        self.ensure_running()?;
         let generation = {
             let mut state = self.state.lock().await;
             if state.check.generation == Some(state.generation) && state.check.success.is_some() {
@@ -399,7 +571,7 @@ impl Workspace {
             state.check.error = None;
             state.generation
         };
-        let result = self.run_check().await;
+        let result = tokio::select! { biased; _ = stopped.changed() => Err(anyhow::anyhow!("Workspace disconnected; check cancelled")), result = self.run_check() => result };
         let mut state = self.state.lock().await;
         state.check.running = false;
         match result {
@@ -417,6 +589,67 @@ impl Workspace {
         Ok(())
     }
     async fn run_check(&self) -> Result<(bool, Vec<Value>)> {
+        let has_rust = self.servers.lock().await.contains_key(&Language::Rust);
+        let has_typescript = self
+            .servers
+            .lock()
+            .await
+            .contains_key(&Language::TypeScript);
+        let mut result = if has_rust {
+            self.run_rust_check().await?
+        } else {
+            (true, vec![])
+        };
+        if has_typescript {
+            let binary = crate::language::typescript_binary(&self.root, &self.config)?;
+            let config = if self.root.join("tsconfig.json").is_file() {
+                "tsconfig.json"
+            } else if self.root.join("jsconfig.json").is_file() {
+                "jsconfig.json"
+            } else {
+                bail!(
+                    "Saved-file TypeScript check requires tsconfig.json or jsconfig.json at the workspace root; live file diagnostics remain available"
+                )
+            };
+            let mut command = Command::new(binary);
+            command
+                .args(["--noEmit", "--pretty", "false", "--project", config])
+                .current_dir(&self.root)
+                .envs(&self.config.environment)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            #[cfg(unix)]
+            command.process_group(0);
+            let child = command.spawn()?;
+            #[cfg(unix)]
+            let mut process_group = CheckProcessGroup(child.id().unwrap() as i32);
+            let output = child.wait_with_output().await?;
+            #[cfg(unix)]
+            {
+                process_group.0 = 0;
+            }
+            result.0 &= output.status.success();
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if !output.status.success() && text.trim().is_empty() {
+                bail!(
+                    "TypeScript check exited without diagnostics: {}",
+                    output.status
+                );
+            }
+            for line in text.lines().filter(|line| !line.trim().is_empty()) {
+                result
+                    .1
+                    .push(json!({"source":"typescript","message":line,"rendered":line}));
+            }
+        }
+        Ok(result)
+    }
+    async fn run_rust_check(&self) -> Result<(bool, Vec<Value>)> {
         let mut command = Command::new("cargo");
         command
             .current_dir(&self.root)
@@ -438,11 +671,16 @@ impl Workspace {
         if let Some(target) = &self.config.cargo_target {
             command.args(["--target", target]);
         }
+        #[cfg(unix)]
+        command.process_group(0);
         let mut child = command
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()?;
+        // Cancelling Cargo must also stop rustc/build scripts in its process group.
+        #[cfg(unix)]
+        let mut process_group = CheckProcessGroup(child.id().unwrap() as i32);
         let stderr = child.stderr.take().unwrap();
         let errors = tokio::spawn(async move {
             use tokio::io::AsyncReadExt;
@@ -462,6 +700,10 @@ impl Workspace {
             }
         }
         let success = child.wait().await?.success();
+        #[cfg(unix)]
+        {
+            process_group.0 = 0;
+        }
         let stderr = errors.await??;
         if !success && diagnostics.is_empty() {
             bail!("cargo check failed: {stderr}");
@@ -469,10 +711,13 @@ impl Workspace {
         Ok((success, diagnostics))
     }
     pub async fn sync(&self, event: SyncEvent) -> Result<Value> {
+        let _edit = self.edit_lock.lock().await;
+        self.ensure_running()?;
         // Refresh disk first, so queued editor events cannot undo an already observed disk mutation.
         if let Some(uri) = &event.uri {
+            self.language_server(uri).await?;
             let path = self.path(uri)?;
-            self.disk_changed(&path).await?;
+            self.disk_changed_locked(&path).await?;
         }
         let mut state = self.state.lock().await;
         if event.kind == "connect" {
@@ -516,7 +761,8 @@ impl Workspace {
                     .await?
             }
             "save" => {
-                self.lsp
+                self.existing_server(&uri)
+                    .await?
                     .notify("textDocument/didSave", json!({"textDocument":{"uri":uri}}))
                     .await?;
             }
@@ -524,7 +770,8 @@ impl Workspace {
                 if let Ok(text) = std::fs::read_to_string(self.path(&uri)?) {
                     self.set_document(&mut state, &uri, text, "disk").await?;
                 } else {
-                    self.lsp
+                    self.existing_server(&uri)
+                        .await?
                         .notify("textDocument/didClose", json!({"textDocument":{"uri":uri}}))
                         .await?;
                     state.documents.remove(&uri);
@@ -541,7 +788,8 @@ impl Workspace {
             if let Ok(text) = std::fs::read_to_string(self.path(&uri)?) {
                 self.set_document(state, &uri, text, "disk").await?;
             } else {
-                self.lsp
+                self.existing_server(&uri)
+                    .await?
                     .notify("textDocument/didClose", json!({"textDocument":{"uri":uri}}))
                     .await?;
                 state.documents.remove(&uri);
@@ -549,52 +797,154 @@ impl Workspace {
         }
         Ok(())
     }
-    pub async fn apply_edit(&self, edit: &Value) -> Result<Value> {
-        let mut groups: BTreeMap<String, Vec<Value>> = BTreeMap::new();
-        if let Some(changes) = edit["changes"].as_object() {
-            for (uri, edits) in changes {
-                groups.insert(
+    // Callers hold edit_lock across capture, the LSP request, preparation and commit.
+    pub async fn snapshot(&self) -> Result<crate::refactor::Snapshot> {
+        self.ensure_running()?;
+        let uris: Vec<_> = self.state.lock().await.documents.keys().cloned().collect();
+        for uri in uris {
+            self.disk_changed_locked(&self.path(&uri)?).await?;
+        }
+        let root = self.root.clone();
+        let disk =
+            tokio::task::spawn_blocking(move || crate::refactor::disk_snapshot(&root)).await??;
+        let mut state = self.state.lock().await;
+        // Flush changed closed files too: the watcher may not have delivered them yet.
+        let mut changes = vec![];
+        for (path, hash) in &disk {
+            if state.refactor_disk.get(path) != Some(hash) {
+                changes.push(json!({"uri":self.uri(path)?,"type":2}));
+            }
+        }
+        for path in state.refactor_disk.keys() {
+            if !disk.contains_key(path) {
+                changes.push(json!({"uri":self.uri(path)?,"type":3}));
+            }
+        }
+        if !changes.is_empty() {
+            state.generation += 1;
+        }
+        state.refactor_disk = disk.clone();
+        let documents = state
+            .documents
+            .iter()
+            .map(|(uri, doc)| {
+                (
                     uri.clone(),
-                    edits.as_array().context("Invalid text edits")?.clone(),
+                    crate::refactor::DocumentStamp {
+                        hash: crate::refactor::fingerprint(doc.text.as_bytes()),
+                        version: doc.version,
+                        epoch: doc.epoch,
+                    },
+                )
+            })
+            .collect();
+        drop(state);
+        if !changes.is_empty() {
+            let servers: Vec<_> = self.servers.lock().await.values().cloned().collect();
+            for server in servers {
+                server
+                    .notify(
+                        "workspace/didChangeWatchedFiles",
+                        json!({"changes":changes}),
+                    )
+                    .await?;
+            }
+        }
+        Ok(crate::refactor::Snapshot {
+            instance: self.instance.clone(),
+            disk,
+            documents,
+        })
+    }
+    pub async fn verify_snapshot(&self, snapshot: &crate::refactor::Snapshot) -> Result<()> {
+        let current = self.snapshot().await?;
+        if current.instance != snapshot.instance
+            || current.disk != snapshot.disk
+            || current.documents != snapshot.documents
+        {
+            bail!(
+                "Stale refactor: workspace files or editor buffers changed. Request a new rename/preview; no edits applied"
+            );
+        }
+        Ok(())
+    }
+    pub async fn document_text(&self, uri: &str) -> Result<String> {
+        self.state
+            .lock()
+            .await
+            .documents
+            .get(uri)
+            .map(|d| d.text.clone())
+            .context("Document is not open")
+    }
+    pub async fn prepare_edit(
+        &self,
+        edit: &Value,
+        snapshot: &crate::refactor::Snapshot,
+    ) -> Result<crate::refactor::PreparedEdit> {
+        self.verify_snapshot(snapshot).await?;
+        let state = self.state.lock().await;
+        let mut files = vec![];
+        let mut seen = BTreeSet::new();
+        let mut bytes = 0;
+        for (uri, group) in crate::refactor::text_edit_groups(edit)? {
+            let crate::refactor::DocumentEdits { version, edits } = group;
+            let path = self.path(&uri)?;
+            if !seen.insert(path.clone()) {
+                bail!("Duplicate file aliases in refactor; no edits applied");
+            }
+            let original_disk = std::fs::read_to_string(&path)?;
+            if snapshot.disk.get(&path)
+                != Some(&crate::refactor::fingerprint(original_disk.as_bytes()))
+            {
+                bail!(
+                    "Stale or unsupported refactor target: {}; no edits applied",
+                    path.display()
+                );
+            }
+            let canonical_uri = self.uri(&path)?;
+            let document = state.documents.get(&canonical_uri);
+            if let Some(version) = version
+                && document.map(|d| d.version) != Some(version)
+            {
+                bail!("Stale LSP document version; no edits applied");
+            }
+            let before = document
+                .map(|d| d.text.clone())
+                .unwrap_or_else(|| original_disk.clone());
+            let after = edit_text(&before, &edits)?;
+            bytes += original_disk.len() + before.len() + after.len();
+            if bytes > crate::refactor::MAX_EDIT_BYTES {
+                bail!("Refactor exceeds 16 MiB edit limit; no edits applied");
+            }
+            files.push(crate::refactor::FileEdit {
+                path,
+                original_disk,
+                before,
+                after,
+                edits,
+            });
+        }
+        Ok(crate::refactor::PreparedEdit { files })
+    }
+    pub async fn commit_edit(
+        &self,
+        edit: &crate::refactor::PreparedEdit,
+        snapshot: &crate::refactor::Snapshot,
+        verbose: bool,
+    ) -> Result<Value> {
+        self.verify_snapshot(snapshot).await?;
+        // No awaits between final validation and file replacement.
+        self.ensure_running()?;
+        edit.commit()?;
+        for file in &edit.files {
+            if let Err(error) = self.disk_changed_locked(&file.path).await {
+                bail!(
+                    "Edits applied but analyzer synchronization failed: {error}. Inspect disk; do not blindly retry"
                 );
             }
         }
-        if let Some(changes) = edit["documentChanges"].as_array() {
-            for change in changes {
-                if change.get("kind").is_some() {
-                    bail!(
-                        "File create/rename/delete code actions are not supported in this MVP; no edits applied"
-                    );
-                }
-                groups
-                    .entry(
-                        change["textDocument"]["uri"]
-                            .as_str()
-                            .context("Missing document URI")?
-                            .into(),
-                    )
-                    .or_default()
-                    .extend(change["edits"].as_array().context("Missing edits")?.clone());
-            }
-        }
-        let mut writes = vec![];
-        for (uri, edits) in groups {
-            let path = self.path(&uri)?;
-            let state = self.state.lock().await;
-            let text = state
-                .documents
-                .get(&uri)
-                .map(|d| d.text.clone())
-                .unwrap_or(std::fs::read_to_string(&path)?);
-            writes.push((path, edit_text(&text, &edits)?));
-        }
-        let mut changed = vec![];
-        for (path, text) in writes {
-            std::fs::write(&path, text)?;
-            self.disk_changed(&path).await?;
-            changed.push(path);
-        }
-        Ok(json!({"applied":true,"files":changed}))
+        Ok(edit.receipt(&self.root, true, verbose))
     }
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -606,4 +956,18 @@ pub struct SyncEvent {
     pub text: Option<String>,
     #[serde(default)]
     pub epoch: u64,
+}
+
+#[cfg(unix)]
+struct CheckProcessGroup(i32);
+#[cfg(unix)]
+impl Drop for CheckProcessGroup {
+    fn drop(&mut self) {
+        if self.0 > 0 {
+            // SAFETY: this is the separate process group created for our Cargo child.
+            unsafe {
+                libc::kill(-self.0, libc::SIGKILL);
+            }
+        }
+    }
 }

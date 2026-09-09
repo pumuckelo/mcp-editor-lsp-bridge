@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "id": "4JxDQ7OdQ1BKSW0uJKUVk",
+  "title": "Improve bridge agent workflow and guarded refactoring",
+  "description": "Compact output with verbose detail, classified connection errors, default apply rename with receipts, symbol selection, and expiring previews protected against stale workspace content. Preserve zero-based UTF-16 and test Rust/TypeScript CLI flows.",
+  "stage": "reviewing",
+  "status": "done",
+  "revision": 3,
+  "createdAt": "2026-09-09T08:10:18.169Z",
+  "updatedAt": "2026-09-09T08:29:14.481Z",
+  "todos": [
+    {
+      "id": "K6In9BuotDtJJDk-oYuE2",
+      "title": "Implement guarded edit plans and default rename with symbol selection",
+      "status": "done"
+    },
+    {
+      "id": "yOxCR5QxAIUxuIdNn42Xf",
+      "title": "Add compact responses and actionable connection errors",
+      "status": "done"
+    },
+    {
+      "id": "GjmV-1B3IeJ6rOW_sXMsQ",
+      "title": "Test real Rust/TypeScript flows and update skill/docs/install",
+      "status": "done"
+    }
+  ],
+  "findings": [],
+  "notes": [
+    {
+      "id": "8jnEIYPInFVeY81NTiT0E",
+      "text": "Implemented shared compact/verbose responses, classified connection errors, default-apply rename receipts, symbol-based selection, bounded expiring preview plans, and guarded code actions. Real TypeScript tests pass for stale disk/overlay rejection, ambiguity and concurrent plan application. Rust CLI preview applied through MCP and default symbol rename passed. Final suite/install pending after adding closed-file watcher synchronization before refactors.",
+      "createdAt": "2026-09-09T08:25:20.315Z"
+    },
+    {
+      "id": "rAM3YwB07Dt-W7Nx5JrtD",
+      "text": "Completed all 11 tests (six unit, two CLI, three real-server integrations), formatting, Clippy with warnings denied, release build and skill validation. Installed bridge/core 0.2.0 and refreshed the shared server, preserving three active workspaces plus the demo disconnected state. Installed CLI verified compact Rust status/diagnostics and TypeScript hover-by-symbol plus fresh SDS compiler diagnostics. Actual sandbox test returned PERMISSION_DENIED with the underlying EPERM cause. README and linked Codex/Pi skill now explain default-apply rename, optional five-minute preview plans, receipts, symbol ambiguity, guards, verbose output and migration. Guarded staged writes are intentionally not described as an OS-level cross-file transaction.",
+      "createdAt": "2026-09-09T08:29:14.481Z"
+    }
+  ],
+  "history": [
+    {
+      "id": "HQuWbHvE1xvixfrvbsWnB",
+      "revision": 1,
+      "at": "2026-09-09T08:10:18.169Z",
+      "changes": [
+        "Task created"
+      ]
+    },
+    {
+      "id": "W5rozyrpMQEj7jvkMDLEb",
+      "revision": 2,
+      "at": "2026-09-09T08:25:20.315Z",
+      "changes": [
+        "Status: active",
+        "Stage: reviewing",
+        "Todo completed: Implement guarded edit plans and default rename with symbol selection",
+        "Todo completed: Add compact responses and actionable connection errors",
+        "Progress note added"
+      ]
+    },
+    {
+      "id": "wtRtNQ3mfOUAtVXxRHSRh",
+      "revision": 3,
+      "at": "2026-09-09T08:29:14.481Z",
+      "changes": [
+        "Todo completed: Test real Rust/TypeScript flows and update skill/docs/install",
+        "Progress note added",
+        "Status: done"
+      ]
+    }
+  ]
+}

@@ -25,6 +25,8 @@ pub struct AnalysisState {
 pub struct Lsp {
     writer: Mutex<ChildStdin>,
     child: Mutex<Child>,
+    #[cfg(unix)]
+    process_group: std::sync::Mutex<ProcessGroup>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value>>>>,
     next: AtomicU64,
     pub state: RwLock<AnalysisState>,
@@ -33,11 +35,18 @@ pub struct Lsp {
 impl Lsp {
     pub async fn start(
         root: &Path,
-        binary: &str,
-        config: Value,
+        spec: crate::language::ServerSpec,
         environment: &HashMap<String, String>,
     ) -> Result<Arc<Self>> {
-        let mut child = Command::new(binary)
+        let binary = &spec.command;
+        let config = spec.settings;
+        let section_name = spec.section;
+        let server_status = spec.server_status;
+        let mut command = Command::new(binary);
+        #[cfg(unix)]
+        command.process_group(0);
+        let mut child = command
+            .args(&spec.args)
             .current_dir(root)
             .envs(environment)
             .stdin(std::process::Stdio::piped())
@@ -50,6 +59,8 @@ impl Lsp {
         let stderr = child.stderr.take().unwrap();
         let server = Arc::new(Self {
             writer: Mutex::new(child.stdin.take().unwrap()),
+            #[cfg(unix)]
+            process_group: std::sync::Mutex::new(ProcessGroup(child.id().unwrap() as i32)),
             child: Mutex::new(child),
             pending: Mutex::new(HashMap::new()),
             next: AtomicU64::new(1),
@@ -82,8 +93,8 @@ impl Lsp {
                                         let section = item["section"]
                                             .as_str()
                                             .unwrap_or("")
-                                            .trim_start_matches("rust-analyzer.");
-                                        if section.is_empty() || section == "rust-analyzer" {
+                                            .trim_start_matches(&format!("{section_name}."));
+                                        if section.is_empty() || section == section_name {
                                             config.clone()
                                         } else {
                                             section.split('.').fold(&config, |v, k| &v[k]).clone()
@@ -94,7 +105,10 @@ impl Lsp {
                             "workspace/applyEdit" => {
                                 json!({"applied":false,"failureReason":"Use the bridge apply_code_action tool"})
                             }
-                            "window/workDoneProgress/create"
+                            "workspace/diagnostic/refresh"
+                            | "workspace/semanticTokens/refresh"
+                            | "workspace/inlayHint/refresh"
+                            | "window/workDoneProgress/create"
                             | "client/registerCapability"
                             | "client/unregisterCapability" => Value::Null,
                             _ => {
@@ -147,14 +161,25 @@ impl Lsp {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                tracing::debug!("rust-analyzer: {line}");
+                tracing::debug!("language server: {line}");
             }
         });
         let uri = url::Url::from_directory_path(root)
             .map_err(|_| anyhow::anyhow!("Invalid workspace path"))?;
-        let result = server.request("initialize", json!({"processId":std::process::id(),"rootUri":uri.as_str(),"workspaceFolders":[{"uri":uri.as_str(),"name":root.file_name().unwrap_or_default().to_string_lossy()}],"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"didChangeWatchedFiles":{"dynamicRegistration":true}},"textDocument":{"publishDiagnostics":{"versionSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix","refactor","source"]}},"resolveSupport":{"properties":["edit"]}}},"window":{"workDoneProgress":true},"experimental":{"serverStatusNotification":true}},"initializationOptions":initialization})).await?;
+        let result = server.request("initialize", json!({"processId":std::process::id(),"rootUri":uri.as_str(),"workspaceFolders":[{"uri":uri.as_str(),"name":root.file_name().unwrap_or_default().to_string_lossy()}],"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"didChangeWatchedFiles":{"dynamicRegistration":true}},"textDocument":{"documentSymbol":{"hierarchicalDocumentSymbolSupport":true},"rename":{"prepareSupport":true},"diagnostic":{"dynamicRegistration":false,"relatedDocumentSupport":true},"publishDiagnostics":{"versionSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix","refactor","source"]}},"resolveSupport":{"properties":["edit"]}}},"window":{"workDoneProgress":true},"experimental":{"serverStatusNotification":true}},"initializationOptions":initialization})).await?;
         *server.capabilities.write().await = result["capabilities"].clone();
+        if result["capabilities"]["positionEncoding"]
+            .as_str()
+            .is_some_and(|v| v != "utf-16")
+        {
+            bail!("Language server did not negotiate UTF-16 positions");
+        }
         server.notify("initialized", json!({})).await?;
+        if !server_status {
+            let mut state = server.state.write().await;
+            state.ready = true;
+            state.status = "ready".into();
+        }
         Ok(server)
     }
     pub async fn send(&self, value: Value) -> Result<()> {
@@ -202,9 +227,33 @@ impl Lsp {
         )
         .await;
         let _ = self.notify("exit", Value::Null).await;
+        #[cfg(unix)]
+        self.process_group.lock().unwrap().stop();
         let _ = self.child.lock().await.kill().await;
     }
     pub async fn pid(&self) -> Option<u32> {
         self.child.lock().await.id()
+    }
+}
+
+// Wrappers may spawn the actual language server; stop the entire owned process group.
+#[cfg(unix)]
+struct ProcessGroup(i32);
+#[cfg(unix)]
+impl ProcessGroup {
+    fn stop(&mut self) {
+        if self.0 > 0 {
+            // SAFETY: this group was created for our child, never the host shell.
+            unsafe {
+                libc::kill(-self.0, libc::SIGKILL);
+            }
+            self.0 = 0;
+        }
+    }
+}
+#[cfg(unix)]
+impl Drop for ProcessGroup {
+    fn drop(&mut self) {
+        self.stop();
     }
 }

@@ -9,7 +9,7 @@ use clap::{Arg, ArgAction, Command};
 use serde_json::{Value, json};
 use std::{
     io::{IsTerminal, Read},
-    path::{Path, PathBuf},
+    path::Path,
     process::ExitCode,
     time::Duration,
 };
@@ -17,7 +17,7 @@ use std::{
 fn command() -> Command {
     let mut root = Command::new("bridge")
         .version(env!("CARGO_PKG_VERSION"))
-        .about("Shared Rust semantic tools. JSON results on stdout, errors on stderr. Positions are zero-based UTF-16.")
+        .about("Shared Rust and TypeScript semantic tools. JSON results on stdout, errors on stderr. Positions are zero-based UTF-16.")
         .subcommand_required(true).arg_required_else_help(true)
         .arg(Arg::new("endpoint").long("endpoint").global(true).default_value("http://127.0.0.1:47831").help("Running core URL; client calls never launch an analyzer"))
         .subcommand(Command::new("serve").about("Run the shared core, UI and MCP server")
@@ -50,14 +50,20 @@ fn command() -> Command {
             let mut arg = Arg::new(name.clone()).long(name.replace('_', "-"));
             arg = match name.as_str() {
                 "line" | "character" => arg.value_parser(clap::value_parser!(u32)),
-                "apply" | "check" => arg.action(ArgAction::SetTrue),
-                "workspace" => arg.help("Cargo workspace directory; inferred from cwd if omitted"),
+                "apply" | "check" | "preview" | "verbose" => arg.action(ArgAction::SetTrue),
+                "workspace" => arg.help("Workspace directory; inferred from cwd if omitted"),
                 "path" => arg.help("File path relative to cwd (JSON paths are workspace-relative)"),
                 "end" => arg.help("Range end JSON: {\"line\":0,\"character\":1}"),
                 _ => arg,
             };
-            if name != "workspace" {
+            if name != "workspace" && name != "verbose" {
                 arg = arg.conflicts_with_all(["json", "stdin"]);
+            }
+            if name == "symbol" {
+                arg = arg.conflicts_with_all(["line", "character"]);
+            }
+            if name == "preview" {
+                arg = arg.conflicts_with("apply");
             }
             cmd = cmd.arg(arg);
         }
@@ -76,35 +82,15 @@ fn command() -> Command {
 }
 
 fn infer_workspace(cwd: &Path) -> Result<String, ApiError> {
-    let output = std::process::Command::new("cargo")
-        .args(["locate-project", "--workspace", "--message-format", "plain"])
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| {
-            ApiError::invalid(format!(
-                "Cannot infer workspace: {e}. Pass --workspace /path/to/workspace."
-            ))
-        })?;
-    if !output.status.success() {
-        return Err(ApiError::invalid(format!(
-            "Cannot infer Cargo workspace: {} Pass --workspace, or use workspace-status --all to list sessions.",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    let manifest = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    canonical_workspace(
-        manifest
-            .parent()
-            .ok_or_else(|| ApiError::invalid("Cargo returned an invalid manifest path"))?,
-    )
+    let root = crate::language::infer_root(cwd).map_err(|e| ApiError::invalid(e.to_string()))?;
+    canonical_workspace(&root)
 }
+
 fn canonical_workspace(path: &Path) -> Result<String, ApiError> {
     let path = path.canonicalize().map_err(|e| {
         ApiError::invalid(format!("Cannot resolve workspace {}: {e}", path.display()))
     })?;
-    if !path.join("Cargo.toml").is_file() {
-        return Err(ApiError::invalid("Workspace must contain Cargo.toml"));
-    }
+    crate::language::Language::default_for(&path).map_err(|e| ApiError::invalid(e.to_string()))?;
     Ok(path.to_string_lossy().into_owned())
 }
 fn arguments(name: &str, matches: &clap::ArgMatches) -> Result<Request, ApiError> {
@@ -133,7 +119,7 @@ fn arguments(name: &str, matches: &clap::ArgMatches) -> Result<Request, ApiError
         for (field, _) in operation.input_schema["properties"].as_object().unwrap() {
             match field.as_str() {
                 "workspace" => {}
-                "apply" | "check" => {
+                "apply" | "check" | "preview" | "verbose" => {
                     if matches.get_flag(field) {
                         values.insert(field.clone(), json!(true));
                     }
@@ -191,6 +177,14 @@ fn arguments(name: &str, matches: &clap::ArgMatches) -> Result<Request, ApiError
         let cwd = std::env::current_dir().map_err(|e| ApiError::invalid(e.to_string()))?;
         args.insert("workspace".into(), json!(infer_workspace(&cwd)?));
     }
+    if matches.try_get_one::<bool>("verbose").ok().flatten() == Some(&true) {
+        if args.get("verbose") == Some(&json!(false)) {
+            return Err(ApiError::invalid(
+                "--verbose disagrees with JSON verbose=false",
+            ));
+        }
+        args.insert("verbose".into(), json!(true));
+    }
     Request::decode(name, json!(args))
 }
 
@@ -216,9 +210,14 @@ pub async fn call(endpoint: &str, request: &Request) -> Result<Value, ApiError> 
         .timeout(Duration::from_secs(180))
         .build()
         .map_err(|e| ApiError::unavailable(e.to_string()))?;
-    let response = client.post(url).json(request).send().await.map_err(|e| ApiError::unavailable(format!("Cannot reach bridge core at {endpoint}: {e}. Start it with bridge serve. The CLI does not start another analyzer.")))?;
+    let response = client
+        .post(url)
+        .json(request)
+        .send()
+        .await
+        .map_err(|e| connection_error(endpoint, &e, e.is_timeout()))?;
     let status = response.status();
-    match response.json::<ApiResponse>().await.map_err(|e| ApiError::unavailable(format!("Core returned HTTP {status} with an invalid response: {e}. Ensure the running core supports the CLI API.")))? {
+    match response.json::<ApiResponse>().await.map_err(|e| if e.is_timeout() || e.is_body() { connection_error(endpoint, &e, e.is_timeout()) } else { ApiError::unavailable(format!("Core returned HTTP {status} with an invalid response: {e}. Ensure the running core supports the CLI API.")) })? {
         ApiResponse::Success { data } if status.is_success() => Ok(data),
         ApiResponse::Success { .. } => Err(ApiError::unavailable(format!("Core returned HTTP {status}"))),
         ApiResponse::Failure { error } => Err(error),
@@ -333,4 +332,71 @@ async fn serve(options: &clap::ArgMatches) -> anyhow::Result<()> {
         .await;
     core.shutdown().await;
     Ok(result?)
+}
+
+fn connection_error(
+    endpoint: &str,
+    error: &(dyn std::error::Error + 'static),
+    timeout: bool,
+) -> ApiError {
+    let mut current = Some(error);
+    let mut causes = vec![];
+    let mut kind = None;
+    while let Some(error) = current {
+        let text = error.to_string();
+        if causes.last() != Some(&text) {
+            causes.push(text);
+        }
+        if let Some(io) = error.downcast_ref::<std::io::Error>() {
+            kind = Some(io.kind());
+        }
+        current = error.source();
+    }
+    let (code, guidance) = match kind {
+        Some(std::io::ErrorKind::PermissionDenied) => (
+            ErrorCode::PermissionDenied,
+            "Localhost access was denied by the sandbox or OS. Retry through the harness permission flow; do not start another core.",
+        ),
+        Some(std::io::ErrorKind::ConnectionRefused) => (
+            ErrorCode::ConnectionRefused,
+            "No core accepted the connection. Check its endpoint and running state; start bridge serve if stopped.",
+        ),
+        Some(std::io::ErrorKind::TimedOut) => (
+            ErrorCode::TimedOut,
+            "The core did not respond in time. A mutation may already have applied; inspect disk before retrying.",
+        ),
+        _ if timeout => (
+            ErrorCode::TimedOut,
+            "The core did not respond in time. A mutation may already have applied; inspect disk before retrying.",
+        ),
+        _ => (
+            ErrorCode::Unavailable,
+            "Check core availability and sandbox localhost permissions. For a mutation, inspect disk before retrying.",
+        ),
+    };
+    ApiError {
+        code,
+        message: format!(
+            "Cannot reach bridge core at {endpoint}: {}. {guidance}",
+            causes.join(": ")
+        ),
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn classify_connection_failures() {
+        for (kind, expected) in [
+            (std::io::ErrorKind::PermissionDenied, "PERMISSION_DENIED"),
+            (std::io::ErrorKind::ConnectionRefused, "CONNECTION_REFUSED"),
+            (std::io::ErrorKind::TimedOut, "TIMED_OUT"),
+        ] {
+            let error = connection_error("http://127.0.0.1:1", &std::io::Error::from(kind), false);
+            assert_eq!(serde_json::to_value(error.code).unwrap(), expected);
+            if kind == std::io::ErrorKind::PermissionDenied {
+                assert!(!error.message.contains("start bridge serve"));
+            }
+        }
+    }
 }

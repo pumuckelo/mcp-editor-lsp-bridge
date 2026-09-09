@@ -6,3 +6,10 @@ pub mod lsp;
 pub mod mcp;
 pub mod protocol;
 pub mod server;
+
+pub mod language;
+
+pub mod refactor;
+
+pub mod output;
+pub mod symbols;
