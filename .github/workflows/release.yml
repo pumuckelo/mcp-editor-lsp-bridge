@@ -1,0 +1,71 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            platform: darwin-arm64
+          - runner: macos-15-intel
+            platform: darwin-x64
+          - runner: ubuntu-22.04
+            platform: linux-x64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Test installer
+        run: python3 scripts/test-install.py
+      - name: Verify release version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          test "$GITHUB_REF_NAME" = "v$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
+      - name: Test and package
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo test --locked
+          sh scripts/package-release.sh "${{ matrix.platform }}"
+      - name: Smoke test binaries
+        run: |
+          release/editor-bridge-${{ matrix.platform }}/bridge --version
+          release/editor-bridge-${{ matrix.platform }}/bridge tools > /dev/null
+          cd release
+          shasum -a 256 editor-bridge-${{ matrix.platform }}.tar.gz > editor-bridge-${{ matrix.platform }}.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: editor-bridge-${{ matrix.platform }}
+          path: |
+            release/*.tar.gz
+            release/*.sha256
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Bundle standalone installer
+        run: sh scripts/bundle-installer.sh > artifacts/install.sh
+      - name: Publish archives, checksums, and installer
+        # install.sh is uploaded as an asset, not executed here.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" artifacts/* --verify-tag --generate-notes

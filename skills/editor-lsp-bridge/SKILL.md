@@ -1,7 +1,9 @@
 ---
 name: editor-lsp-bridge
-description: Use the bridge CLI for shared Rust and native TypeScript 7 navigation, refactoring, and diagnostics.
+description: Install or adopt Editor LSP Bridge when requested; use its CLI for Rust and native TypeScript 7 navigation, refactoring, and diagnostics.
 ---
+
+Read [references/setup.md](references/setup.md) **only** when the user requests installation or repository setup, or the CLI is missing. Do not read it for normal usage. A connection error alone does not mean installation is needed.
 
 - Use `bridge` through the shell for Rust/TypeScript/JavaScript symbols, definitions, references, hover, rename, code actions and diagnostics. Commands connect to the shared running core and analyzer; do not launch a server per agent.
 - The CLI infers the workspace from cwd; override with `--workspace PATH`. Inspect readiness with `bridge workspace-status`; `--all` lists sessions from any directory.

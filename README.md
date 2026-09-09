@@ -1,103 +1,173 @@
-# MCP editor LSP bridge
+# Editor LSP Bridge
 
-A small Rust service that gives coding agents semantic Rust and TypeScript tools through a shared HTTP MCP endpoint or a thin CLI client. It shares language servers per workspace directory: rust-analyzer for Rust and the native TypeScript 7 LSP for TypeScript/JavaScript. An optional Zed companion sends live editor buffers, including unsaved edits. Zed keeps its own analyzer; the companion does not analyze or index code.
+Shared Rust and TypeScript language intelligence for coding agents, through a small **CLI**. Run one local core, then use `bridge` for navigation, diagnostics and refactoring. Agents reuse one language server per workspace instead of starting their own.
 
-## Run
+Supports **rust-analyzer** and the **native TypeScript 7 LSP** (including JavaScript). An optional Zed companion forwards unsaved editor buffers. MCP is optional; no MCP configuration is needed for the CLI.
 
-Requires a current Rust toolchain, Cargo, and `rust-analyzer` on PATH. Install the analyzer with `rustup component add rust-analyzer` if necessary.
+## Install
 
-```sh
-cargo build --release
-./target/release/mcp-editor-lsp-bridge serve
-```
-
-Open **http://127.0.0.1:47831/** for the dashboard. Connect agent clients to **http://127.0.0.1:47831/mcp** using Streamable HTTP. Start the service once, not once per agent. The service binds loopback only and rejects foreign browser origins and hostnames.
-
-Optional arguments:
+Download prebuilt executables for macOS or Linux (Apple Silicon/ARM64 and x64):
 
 ```sh
-./target/release/mcp-editor-lsp-bridge serve --port 47831 --workspace /absolute/path/to/project --config bridge.json
+curl -fsSL https://github.com/pumuckelo/mcp-editor-lsp-bridge/releases/latest/download/install.sh | sh
 ```
 
-Workspaces can also be attached from the dashboard, an MCP tool call, or the Zed companion. Use the directory containing `Cargo.toml`, `tsconfig.json`, `jsconfig.json` or `package.json`. Distinct worktree directories get distinct analyzers. Canonical aliases of a directory share the same session.
+This requires a published GitHub Release; the first release becomes available after the release workflow is pushed and a version tag is published. The installer verifies the archive checksum and installs into `~/.local/share/editor-bridge` with commands in `~/.local/bin`. Add that directory to your PATH. No Rust compiler is required to run the prebuilt executables.
 
-To install the executable on PATH:
+Run the same command to upgrade. Use `INSTALL_VERSION=vX.Y.Z`, `INSTALL_ROOT`, or `INSTALL_BIN_DIR` on the installer process to select a version or location. The installer does not edit shell profiles or repository instructions.
+
+### Agent setup
+
+The bundled [usage skill](skills/editor-lsp-bridge/SKILL.md) has a separate [setup reference](skills/editor-lsp-bridge/references/setup.md). Install the skill in your agent's supported skill directory, then ask it to install and use Editor LSP Bridge in your project. Setup guidance covers installation and adding a short note to the project's `AGENTS.md` and `CLAUDE.md` when adopting the tool. Normal usage does not load the setup reference.
+
+For agent-led setup, give your agent the [setup reference](https://github.com/pumuckelo/mcp-editor-lsp-bridge/blob/main/skills/editor-lsp-bridge/references/setup.md) and ask it to install and use the tool in your repository. It can install the bundled usage skill as part of that setup.
+
+### Build from source
+
+With a current Rust toolchain, run `cargo install --path . --locked` from this repository. Both installation methods provide `bridge` and `mcp-editor-lsp-bridge`.
+
+Rust workspaces still need their Rust development toolchain and `rust-analyzer` (`rustup component add rust-analyzer`).
+
+For TypeScript/JavaScript projects, install **TypeScript 7** in the target project using its package manager, for example:
 
 ```sh
-cargo install --path . --locked
+npm install --save-dev typescript@^7
 ```
 
-A generic MCP client configuration (the enclosing key depends on the client):
+The bridge verifies version 7 and runs the project's `tsc --lsp --stdio`. It does not download servers automatically or fall back to older TypeScript servers. A separately installed native server can be selected with `typescript_analyzer` in the core configuration.
 
-```json
-{
-  "mcpServers": {
-    "editor-lsp-bridge": {
-      "url": "http://127.0.0.1:47831/mcp"
-    }
-  }
-}
-```
+## Start once
 
-This service is HTTP-only. It intentionally has no per-agent stdio server launcher.
-
-## CLI for agents (including Pi)
-
-`cargo install --path . --locked` installs both `bridge` and the existing `mcp-editor-lsp-bridge` executable. Both support the same commands. Run the core once with `bridge serve`; subsequent commands connect to it and exit. They never launch an analyzer or a second core.
-
-From anywhere inside a Rust or TypeScript workspace:
+Keep this running in a terminal:
 
 ```sh
+bridge serve
+```
+
+Open [the dashboard](http://127.0.0.1:47831/) to manage workspaces. It supports light, dark and system themes. The core binds to loopback and rejects foreign browser origins and hostnames.
+
+In another terminal, go to your project:
+
+```sh
+cd /path/to/project
+bridge workspace-connect
 bridge workspace-status
-bridge workspace-symbols --query MyType
-bridge definition --path src/lib.rs --line 12 --character 8
-bridge references --path src/lib.rs --line 12 --character 8
 bridge diagnostics --check
-bridge rename --path src/lib.rs --line 12 --character 8 --new-name BetterName
-bridge rename --path src/lib.rs --line 12 --character 8 --new-name BetterName --preview
-bridge apply-rename --plan-id RETURNED_ID
-bridge code-actions --path src/lib.rs --line 12 --character 8
-bridge apply-code-action --action-id RETURNED_ID
+```
+
+CLI commands connect to the running core and exit. They never start a second core. First-time queries can attach new workspaces automatically; explicit connection is useful for setup.
+
+Optional startup settings:
+
+```sh
+bridge serve --port 47831 --workspace /path/to/project --config bridge.json
+```
+
+Use `--endpoint http://127.0.0.1:PORT` on CLI commands when using another port. After upgrading, restart the core too so the CLI and core use the same version.
+
+## Use from your agent or shell
+
+Run commands from inside the target workspace. The same interface works for shell-based agents such as Pi; no MCP support is required. The concise [agent skill](skills/editor-lsp-bridge/SKILL.md) documents the workflow for your harness.
+
+```sh
+bridge workspace-symbols --query MyType
+bridge document-symbols --path src/lib.rs
+bridge definition --path src/lib.rs --symbol my_function
+bridge references --path src/lib.rs --symbol my_function
+bridge hover --path src/lib.rs --symbol my_function
+bridge diagnostics --check
+```
+
+Use `.ts`/`.tsx`/`.js` paths in TypeScript projects. `--symbol` selects a declaration through the language server. Missing or ambiguous names return candidates; use exact positions when needed:
+
+```sh
+bridge definition --path src/lib.rs --line 12 --character 8
 bridge tools
+bridge rename --help
 bridge schema code-actions
 ```
 
-Lines and characters are **zero-based UTF-16**, the same as MCP. Ordinary `--path` values are relative to your current directory. JSON paths retain the MCP convention: workspace-relative paths, absolute paths or file URIs. Hyphenated command names also accept their MCP underscore names.
+Positions are **zero-based lines and UTF-16 characters**. Ordinary `--path` arguments are relative to your current directory. JSON paths are workspace-relative, absolute, or file URIs within the workspace.
 
-Complex calls accept either `--json` or piped `--stdin`:
+Workspace inference chooses the nearest supported Cargo/TypeScript/JavaScript project marker, stopping at Git boundaries. Cargo members resolve to their Cargo workspace. Use `--workspace /path/to/root` for a particular monorepo root. Different Git worktree directories get separate analyzers; canonical aliases share a session.
+
+### Rename and code actions
+
+**Rename applies immediately by default**, including references across files:
+
+```sh
+bridge rename --path src/lib.rs --symbol old_name --new-name new_name
+bridge diagnostics --check
+```
+
+When scope needs inspection, preview first and apply that exact plan:
+
+```sh
+bridge rename --path src/lib.rs --symbol old_name --new-name new_name --preview
+bridge apply-rename --plan-id RETURNED_ID
+```
+
+Receipts report changed paths, edit counts and original line positions. `--verbose` adds ranges and old/new text. `--apply` remains an optional compatibility alias; JSON `apply: false` also requests a preview.
+
+```sh
+bridge code-actions --path src/lib.rs --line 12 --character 8
+bridge apply-code-action --action-id RETURNED_ID
+```
+
+Preview plans are single-use, workspace-bound and expire after **five minutes**. Code actions also expire after five minutes. Disconnecting or restarting clears both caches. The core retains at most eight preview plans and 128 code actions.
+
+Refactors check disk snapshots and editor versions before applying. If content changed, inspect the changes and request a fresh plan. Writes are staged, but are not a fully atomic multi-file transaction against external tools; inspect disk after a partial failure or lost response before retrying.
+
+### JSON inputs and output
+
+Complex inputs accept inline JSON or stdin:
 
 ```sh
 bridge code-actions --json '{"path":"src/lib.rs","line":12,"character":8,"end":{"line":14,"character":0}}'
-printf '%s' '{"path":"src/lib.rs","line":12,"character":8}' | bridge hover --stdin
+printf '%s' '{"path":"src/lib.rs","symbol":"my_function"}' | bridge hover --stdin
 ```
 
-Workspace inference uses `cargo locate-project --workspace` from cwd, including workspace members and separate worktree directories. This reads Cargo metadata; it does not index or compile the project. Use `--workspace /path/to/workspace` to override inference, or include `workspace` in JSON. Conflicting JSON and flag workspaces are rejected. Use `bridge workspace-status --all` to list sessions from any directory without inference.
+Do not mix JSON/stdin with operation flags, except `--workspace`, `--endpoint` and supported `--verbose`. Conflicting workspace values are rejected. Commands return compact JSON on stdout; `--verbose` expands supported results. Errors go to stderr as `{ "error": { "code", "message" } }`. Exit codes: **0** success, **2** invalid input, **1** connection/operation failure. Always inspect the result: ambiguous symbol selection can return `applied: false` without an error exit.
 
-Use `--endpoint http://127.0.0.1:PORT` for another local core. JSON/stdin cannot be mixed with operation flags except `--workspace` and `--endpoint`. Output is the same result JSON as MCP; logs and `{ "error": { "code", "message" } }` go to stderr. Exit codes: 0 success, 2 invalid input, 1 unavailable core or failed operation. No automatic mutation retries. Code-action IDs can be listed through one interface and applied through the other; they expire when the core restarts.
+## Manage workspaces
 
-### Shared application boundary
+```sh
+bridge workspace-status --all
+bridge workspace-disconnect
+bridge workspace-connect
+```
 
-`src/application.rs` defines typed requests, generates input schemas, and implements semantic operations and the shared action cache. `src/mcp.rs` and the `/api/execute` HTTP handler are inbound adapters over the same `Arc<Application>`. `src/cli.rs` handles shell input, workspace inference, and HTTP calls. `Core` owns workspace state; its LSP/process/filesystem components perform the actual work. There is no second copy of the semantic implementation in the CLI or MCP adapter.
+The dashboard's **Disconnect** stops that workspace's analyzers, file watcher and compiler checks. Other workspaces continue running. After explicit disconnection, queries and companions cannot silently reattach it; use **Reconnect** or `workspace-connect`.
 
-The HTTP adapter accepts `{ "operation": "definition", "arguments": { ... } }`, and returns `{ "data": ... }` or `{ "error": { "code", "message" } }`. Input validation occurs before workspace attachment. All operations share their schemas across MCP, CLI discovery, and HTTP parsing. LSP result bodies remain JSON because their shapes vary by operation and language-server capability.
+Closing Zed disconnects its companion, **not** the standalone analyzer. Disconnect workspaces you no longer need, or stop the core with Ctrl-C. Disconnected choices are in memory and reset when the core restarts. No source files are deleted or edits rolled back.
 
-## Zed companion
+## Optional: unsaved buffers from Zed
 
-1. Build/install the executable above.
-2. In Zed, run **zed: install dev extension** and select this repository's `zed-extension` directory. Zed builds the extension using Rust's `wasm32-wasip1` target. If needed: `rustup target add wasm32-wasip1`.
-3. Add the companion to your project's Zed settings alongside rust-analyzer:
+Standalone operation reads saved files. To include unsaved buffers:
+
+1. Install the executables above.
+2. In Zed, run **zed: install dev extension** and select this repository's `zed-extension` directory. If required, install its build target with `rustup target add wasm32-wasip1`.
+3. Add the companion alongside your existing servers in Zed settings:
 
 ```json
 {
   "languages": {
-    "Rust": {
-      "language_servers": ["rust-analyzer", "editor-lsp-bridge"]
-    }
-  },
+    "Rust": { "language_servers": ["...", "editor-lsp-bridge"] },
+    "TypeScript": { "language_servers": ["...", "editor-lsp-bridge"] },
+    "TSX": { "language_servers": ["...", "editor-lsp-bridge"] },
+    "JavaScript": { "language_servers": ["...", "editor-lsp-bridge"] }
+  }
+}
+```
+
+If Zed cannot find the executable on its PATH, add an absolute binary path, replacing the example with your own Cargo install location:
+
+```json
+{
   "lsp": {
     "editor-lsp-bridge": {
       "binary": {
-        "path": "/absolute/path/to/mcp-editor-lsp-bridge/target/release/mcp-editor-lsp-bridge",
+        "path": "/home/you/.cargo/bin/mcp-editor-lsp-bridge",
         "arguments": ["companion", "--endpoint", "http://127.0.0.1:47831"]
       }
     }
@@ -105,43 +175,21 @@ The HTTP adapter accepts `{ "operation": "definition", "arguments": { ... } }`, 
 }
 ```
 
-The binary override is unnecessary if `mcp-editor-lsp-bridge` is on Zed's PATH and you use the default port. Restart language servers after changing the configuration. Open the workspace root as the Zed project; a parent folder without a supported project manifest is not supported.
+Open the actual workspace root in Zed and restart language servers after changing settings. Reload/reinstall the dev extension after updating its manifest. The dashboard shows **Zed · Connected** when registered.
 
-The dashboard shows **Zed · Connected** when the companion registers. The companion retries while the core is unavailable. It sends full snapshots from its local editor cache, even when it receives incremental LSP changes. Closing the companion restores saved-file state; an unclean disconnect is detected by heartbeats.
+Zed retains its own analyzer. The companion only forwards open/change/save/close events and snapshots; it does not analyze or index code. The bridge runs its dedicated analyzer, so there are two analyzers, not a proxy or a third analyzer. One companion per workspace is supported; VS Code integration and companion switching are not implemented.
 
-Only one companion can register per workspace. VS Code and companion selection are deferred, but the HTTP synchronization protocol is editor-independent.
-
-### Agent edits take precedence
-
-A saved-file change replaces any conflicting editor overlay in our analyzer. The core increments a document epoch; queued snapshots using the previous epoch are rejected. The companion acknowledges the new epoch without replaying the rejected snapshot. A subsequent fresh edit can establish a new overlay.
-
-This does **not** discard your editor buffer or force a save. If Zed shows a conflict, discard your old unsaved changes as usual. Explicitly saving those edits later is a new disk write. Multi-file rename and code-action tools write directly to disk.
-
-## Tools
-
-Positions are **zero-based lines and UTF-16 characters**, as in LSP. Files can be workspace-relative paths, absolute paths, or file URIs within the workspace.
-
-| Tool | Inputs in addition to `workspace` |
-|---|---|
-| `workspace_status` | none; omit workspace to list sessions |
-| `workspace_symbols` | `query` |
-| `document_symbols` | `path` |
-| `definition`, `references`, `hover` | `path` and either `symbol` or `line` + `character` |
-| `diagnostics` | optional `check: true` to await a current shared compiler check |
-| `rename` | `path`, `new_name`, and either `symbol` or `line` + `character`; applies by default; `preview: true` returns a guarded plan |
-| `code_actions` | `path`, `line`, `character`; optional `end: {line, character}` |
-| `apply_rename` | `plan_id` returned by rename preview |
-| `apply_code_action` | `action_id` returned by `code_actions` |
-
-Use navigation tools rather than guessing symbol locations. Ask for diagnostics after edits. Transient analyzer content-modified errors are retried; other failures are returned as readable MCP tool errors.
+Agent disk edits take precedence over stale companion overlays in the bridge. This does not overwrite Zed's unsaved buffer or force a save: discard conflicting old editor changes as usual. A later explicit save is a new disk write. Heartbeats detect an unclean companion disconnect and restore saved-file state.
 
 ## Diagnostics and configuration
 
-The core separates rust-analyzer's live diagnostics from Cargo's compiler diagnostics. It runs one shared `cargo check --workspace --all-targets --message-format=json` after saved-file changes settle, and caches the result until another observed disk change. Concurrent requests reuse this check. The dedicated analyzer's own check-on-save is disabled to avoid running a duplicate check inside the same core; Zed's separate analyzer may still run its own check.
+`bridge diagnostics` reads cached diagnostics; `bridge diagnostics --check` awaits a shared saved-file check. Check **readiness, freshness, running state, errors and success**. Zero live diagnostics alone does not prove the workspace is clean. Tests and project-specific builds remain necessary.
 
-`ready` reports analyzer indexing state. `checkFresh` reports whether a completed compiler check matches the observed disk generation. A failed process, a running check, or an uninitialized cache is not a clean result. `matchesDocumentVersion` accompanies live diagnostic publications; missing versions cannot be certified current. Cargo checks saved files, not unsaved editor overlays.
+- **Rust:** the core shares `cargo check --workspace --all-targets --message-format=json` and caches it until observed disk changes. Its rust-analyzer check-on-save is disabled to avoid a duplicate check inside the core; Zed's own analyzer may still check separately.
+- **TypeScript:** live diagnostics cover bridge-opened files and companion buffers. `ready` means initialization completed. Saved-file checks use `tsc --noEmit --pretty false --project tsconfig.json` (or `jsconfig.json`) at the workspace root. A package-only workspace supports navigation but needs a root configuration for checks. Scope follows that configuration's inclusions/exclusions.
+- **Mixed workspaces:** file extensions route to the appropriate server; a second language server starts when needed. Workspace-symbol searches and compiler checks cover active languages. Disconnect stops all servers for the workspace.
 
-Example `bridge.json`:
+Example `bridge.json`, passed to `bridge serve --config bridge.json`:
 
 ```json
 {
@@ -151,113 +199,57 @@ Example `bridge.json`:
   "no_default_features": false,
   "cargo_target": null,
   "environment": {},
-  "analyzer_settings": {
-    "procMacro": {"enable": true}
-  }
+  "analyzer_settings": { "procMacro": { "enable": true } }
 }
 ```
 
-The core inherits your environment and workspace toolchain selection. Use `environment` for explicit overrides such as `RUSTUP_TOOLCHAIN`. Environment values are not exposed in the dashboard. Cargo features/target are applied to both analysis and checks; `checkOnSave` is controlled by the core. Configuration is startup-wide in this MVP; restart to change it. It is not automatically copied from Zed.
+Optional `typescript_analyzer` specifies the native executable path; `typescript_settings` supplies its LSP settings. Configuration is startup-wide: restart to change it. It inherits the core's environment and workspace toolchain selection, not Zed's configuration. Environment override values are not exposed in the dashboard.
 
-## Development and validation
+## Troubleshooting and limits
+
+- **`PERMISSION_DENIED` / `Operation not permitted`:** an agent sandbox may block localhost even while the core is running. Retry the authorized command through the harness's permission flow. Do not start another core or change the bind address merely because the sandbox cannot connect.
+- **`CONNECTION_REFUSED`:** check that `bridge serve` is running at the selected endpoint.
+- **`TIMED_OUT` or a lost mutation response:** inspect disk before retrying; the edit may already have applied.
+- Command-based code actions and file create/rename/delete operations are rejected; text edits and cross-file symbol renames are supported.
+- No idle shutdown, resource budgets, persistent sessions or automatic analyzer restart. Restart the core after an analyzer crash.
+- Watching covers supported source files and common manifests, excluding `.git`, `target`, `node_modules`, `dist` and `.next`. External dependencies and arbitrary build-script inputs are not watched; reconnect if analysis is stale after those change.
+- Refactoring snapshots are bounded to 100,000 files / 256 MiB read, with prepared edits capped at 16 MiB. Changes elsewhere in the tracked workspace can invalidate a preview. Symlink traversal is excluded.
+- The dashboard is static HTML/CSS/JavaScript embedded in the Rust executable: no frontend build tool or Node server. The npm TypeScript launcher may require Node.
+
+## Development
 
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
-cargo test --test integration -- --ignored --nocapture
+BRIDGE_TYPESCRIPT=/absolute/path/to/typescript7/tsc cargo test --all-targets -- --include-ignored
 cargo build --manifest-path zed-extension/Cargo.toml --target wasm32-wasip1 --release
 ```
 
-The ignored integration test requires a real rust-analyzer, local HTTP sockets, filesystem notifications, and Cargo subprocesses. It uses temporary fixture workspaces. Sandboxed environments that suppress native file notifications must run that test with appropriate local permissions.
+Real-server tests require rust-analyzer, native TypeScript 7, local sockets, filesystem notifications and compiler subprocesses. Use appropriate local permissions in restricted environments. `examples/demo` is a Rust fixture for manual Zed validation. See [validation notes](docs/VALIDATION.md) and the [companion protocol](docs/companion-protocol.md).
 
-`examples/demo` is a tiny standalone Rust workspace for manual Zed testing. See [the companion protocol](docs/companion-protocol.md) and [validation notes](docs/VALIDATION.md).
+`src/application.rs` owns typed semantic operations and caches. The CLI sends requests to the HTTP inbound adapter; MCP is another adapter over the same application service. `Core` owns workspace state and LSP/process/filesystem behavior. `src/language.rs` contains server-specific policy. There is no duplicate semantic implementation per interface.
 
-## MVP limits
+## Optional MCP interface
 
-- Command-based code actions and file create/rename/delete operations are rejected before applying edits. Text edits and multi-file symbol rename are supported.
-- Refactors verify snapshots and document versions, then stage replacements before writing. Multi-file writes are not an OS transaction: external tools can still race the final check/replacement, and a replacement failure can leave partially applied files. Errors report these cases; inspect disk before retrying.
-- No proxy or reuse of Zed's analyzer. No VS Code companion yet.
-- No workspace resource budgets, idle shutdown, persistent sessions, or automatic analyzer restart. Stop the core with Ctrl-C and restart after an analyzer crash.
-- Workspace file watching covers supported source files and common project manifests. External dependencies and arbitrary build-script inputs are not watched; reconnect after those change.
-- The UI is static HTML/CSS/JavaScript embedded in the Rust binary. No frontend build tool or Node process is needed for the dashboard. The npm TypeScript launcher may require Node.
-
-The concise agent skill lives at `skills/editor-lsp-bridge/SKILL.md`. It supports MCP-capable agents and shell-only agents such as Pi, and is linked into this machine's Codex and Pi skill directories.
-
-## Stop and reconnect workspaces
-
-Use **Disconnect** on an active workspace in the dashboard to stop its analyzer, close its file watcher, and cancel its compiler checks. On Unix, cancellation also kills the check's build-script/compiler process group. Other workspaces remain running. Disconnected workspaces appear in a separate list with a **Reconnect** button.
-
-```sh
-bridge workspace-disconnect
-bridge workspace-connect
-bridge workspace-status --all
-```
-
-Both commands infer the workspace from cwd or accept `--workspace PATH`. First-time queries may still attach new workspaces automatically. After an explicit disconnect, ordinary queries and companion notifications cannot reattach that workspace: reconnect explicitly through CLI or the dashboard. Disconnect also clears cached code actions for that workspace. Closing the editor only disconnects its companion, not the standalone analyzer.
-
-Disconnected-workspace choices are held in memory for the lifetime of the core; restarting the core clears them. No files or editor buffers are deleted. Already completed edits remain on disk; disconnect does not roll back operations.
-
-## Native TypeScript 7
-
-Install `typescript@^7` in the target project using its package manager. The bridge resolves `node_modules/.bin/tsc` in that project or its ancestors up to the Git boundary, verifies version 7, then starts `tsc --lsp --stdio`. TypeScript 5/6 and wrapper language servers are intentionally unsupported. To use a separate native installation, configure `typescript_analyzer` with its executable path; `typescript_settings` holds its LSP settings. No downloads happen automatically.
-
-CLI inference picks the nearest Cargo/TypeScript/JavaScript project marker, stopping at a Git boundary; Cargo members still resolve to their Cargo workspace. Use `--workspace` when a monorepo needs a particular root.
-
-```sh
-bridge document-symbols --path src/example.ts
-bridge references --path src/example.ts --line 0 --character 17
-bridge rename --path src/example.ts --line 0 --character 17 --new-name newName --apply
-bridge diagnostics --check
-```
-
-The same commands support `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, and `.cjs`. File requests route to the right server. Mixed workspaces start their default server on attachment and add the other language server when a file needs it. Workspace symbols search active servers. Status exposes an `analyzers` array; Disconnect stops every server and check for that workspace. Server-specific startup and language policy live in `src/language.rs`, separate from CLI/MCP/HTTP adapters.
-
-TypeScript live diagnostics are pulled for bridge-opened documents, including companion overlays. `ready` means initialization completed, not that every file has been checked. `--check` awaits a shared, cached `tsc --noEmit --pretty false --project tsconfig.json` (or `jsconfig.json`) for saved files. In a mixed workspace, checks run for active languages. A workspace with only `package.json` supports navigation but must add/select a root tsconfig/jsconfig for saved-file checks. Check scope follows that configuration, including its exclusions; this is not a replacement for repository-specific build/test scripts. TypeScript check messages are returned with `source: "typescript"` and raw compiler text.
-
-The watcher includes supported source files and common Rust/TypeScript manifests; it ignores `.git`, `target`, `node_modules`, `dist`, and `.next`. Changes to external dependencies are outside the bridge watcher; reconnect after dependency installation if server state is stale.
-
-For Zed, reload/reinstall the development extension after updating its manifest, then add the companion alongside the editor's default servers:
+MCP is retained for harnesses that prefer native tool discovery. **It is not needed for the recommended CLI workflow.** Run the same core once, then configure a Streamable HTTP connection:
 
 ```json
 {
-  "languages": {
-    "TypeScript": { "language_servers": ["...", "editor-lsp-bridge"] },
-    "TSX": { "language_servers": ["...", "editor-lsp-bridge"] },
-    "JavaScript": { "language_servers": ["...", "editor-lsp-bridge"] }
+  "mcpServers": {
+    "editor-lsp-bridge": { "url": "http://127.0.0.1:47831/mcp" }
   }
 }
 ```
 
-The existing companion binary configuration and open/change/save/close protocol are unchanged. Zed continues using its own server; the companion only forwards buffers.
+Adapt the enclosing configuration to your harness. There is no per-agent stdio launcher. Tool names use underscores (`workspace_symbols`, `apply_rename`, `apply_code_action`) and share the CLI's schemas, edit behavior, caches and diagnostics. Discover the complete operations through the client or `bridge tools`.
 
-Run both real-server integration tests with:
+The underlying HTTP adapter accepts `{ "operation": "definition", "arguments": { ... } }` at `/api/execute` and returns `{ "data": ... }` or `{ "error": { "code", "message" } }`. CLI paths are cwd-relative; adapter paths are workspace-relative. LSP result bodies remain JSON because their shapes vary by operation and server capabilities.
 
-```sh
-BRIDGE_TYPESCRIPT=/absolute/path/to/typescript7/tsc cargo test --all-targets -- --include-ignored
-```
+## Publishing releases
 
-## Agent workflow improvements (0.2)
+The GitHub Actions release workflow builds macOS and Linux executables for ARM64 and x64, packages the dashboard and skills, and publishes archives, SHA-256 checksums, and the installer. Manual workflow runs on a branch build downloadable artifacts without publishing a release.
 
-**Breaking default:** update/restart the shared core together with the CLI when upgrading to 0.2. `rename` now writes changes unless `preview: true` / `--preview` is supplied. The same semantics apply to CLI, HTTP and MCP. `--apply` / `apply: true` remains accepted; explicit JSON `apply: false` retains legacy preview behavior. A preview no longer returns a raw WorkspaceEdit: it returns a receipt and `planId`.
+Update the package version, commit and push the changes, then push a matching `vX.Y.Z` tag. The workflow checks the tag against `Cargo.toml`. GitHub's built-in token publishes the release; no npm account or separate publishing secret is required. The installer attached to the release is an asset for users, not a command executed by the publish step.
 
-```sh
-bridge rename --path src/lib.rs --symbol old_name --new-name new_name
-bridge rename --path src/lib.rs --symbol old_name --new-name new_name --preview
-bridge apply-rename --plan-id RETURNED_ID
-bridge diagnostics --check
-bridge workspace-status --all
-bridge workspace-status --all --verbose
-```
-
-`--symbol` also works for definition, references and hover. Selection uses the language server's declaration selection range, not text search. Ambiguous or missing names return `applied: false`, a reason and compact candidates without editing. Explicit positions remain zero-based UTF-16; do not mix them with a symbol selector.
-
-Rename/apply receipts contain `applied`, `newName`, `fileCount`, `editCount` and `files` with workspace-relative paths, edit counts and zero-based lines from the original text. `symbol` is included when known. `--verbose` adds exact ranges and old/new text. Edit count is not necessarily reference count.
-
-Status omits document/configuration dumps by default. Diagnostics omit clean-file entries and report live/saved diagnostic counts while retaining check success (including null), errors, running state and freshness. Zero live diagnostics never establishes workspace correctness. Document symbols expose compact names, containers and positions; workspace symbols include relative paths. `verbose: true` in API/JSON, or `--verbose` with flags/JSON/stdin, returns full details.
-
-Preview plans are single-use, workspace-bound, expire after five minutes, and disappear on disconnect or restart. Up to eight plans are retained. Applying uses the stored edits without asking the language server to calculate the rename again. Code actions have the same expiry and stale-input protection, with a cache capped at 128 actions.
-
-Before calculating edits, the bridge fingerprints supported workspace source/configuration files and records open-buffer versions/content. Before writing, it checks those snapshots and any LSP document versions. Changes elsewhere in the tracked workspace can invalidate a plan because they can change references. Dependency/build trees and symlink traversal are excluded; unsupported edit targets are rejected. This adds bounded filesystem reads during refactoring, not a second index. Snapshot limits are 100,000 files / 256 MiB read; prepared edits are capped at 16 MiB per operation. Choose a smaller workspace if these limits are exceeded.
-
-Errors distinguish `PERMISSION_DENIED` (sandbox/OS localhost restriction), `CONNECTION_REFUSED` (no listener), `TIMED_OUT`, and other `UNAVAILABLE` failures. The underlying cause is preserved. Timeout or lost response after a mutation requires inspecting disk before retrying.
+Installer sources live in `scripts/installer/`; `scripts/install.sh` loads them when run from a checkout. `sh scripts/bundle-installer.sh > install.sh` produces the standalone release installer. Edit the source modules, not generated bundles.

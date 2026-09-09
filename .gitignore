@@ -5,3 +5,5 @@
 
 **/target/
 /examples/demo/.zed/settings.json
+
+release/
