@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="204" viewBox="0 0 840 204" role="img" aria-labelledby="title desc">
+<title id="title">Shared language intelligence for agents</title><desc id="desc">The bridge CLI connects to a persistent local core that manages rust-analyzer and native TypeScript 7. An optional Zed companion forwards unsaved buffers.</desc>
+<style>
+.box{fill:#fafafa;stroke:#d4d4d4} .label{fill:#171717;font:600 16px system-ui,sans-serif} .detail{fill:#525252;font:13px system-ui,sans-serif} .line{stroke:#a3a3a3;fill:none;stroke-width:1.5} .caption{fill:#737373;font:12px system-ui,sans-serif}
+@media(prefers-color-scheme:dark){.box{fill:#171717;stroke:#404040} .label{fill:#f5f5f5} .detail{fill:#bdbdbd} .caption{fill:#a3a3a3}}
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10" fill="none" stroke="#a3a3a3" stroke-width="1.5"/></marker></defs>
+
+<rect class="box" x="16" y="32" width="228" height="112" rx="12"/>
+<rect x="36" y="54" width="24" height="3" rx="1.5" fill="#888888"/>
+<text class="label" x="36" y="84">Agent CLI</text>
+<text class="detail" x="36" y="108">Navigate, rename, diagnose</text>
+<text class="detail" x="36" y="128">Run from your workspace</text>
+<rect class="box" x="306" y="32" width="228" height="112" rx="12"/>
+<rect x="326" y="54" width="24" height="3" rx="1.5" fill="#888888"/>
+<text class="label" x="326" y="84">Shared local core</text>
+<text class="detail" x="326" y="108">One persistent service</text>
+<text class="detail" x="326" y="128">Optional Zed buffer sync</text>
+<rect class="box" x="596" y="32" width="228" height="112" rx="12"/>
+<rect x="616" y="54" width="24" height="3" rx="1.5" fill="#888888"/>
+<text class="label" x="616" y="84">Language servers</text>
+<text class="detail" x="616" y="108">rust-analyzer · TypeScript 7</text>
+<text class="detail" x="616" y="128">Shared by agents</text>
+<path class="line" d="M254 88h42" marker-end="url(#arrow)"/>
+<path class="line" d="M544 88h42" marker-end="url(#arrow)"/>
+<text class="caption" x="420" y="181" text-anchor="middle">Saved files work standalone · The Zed companion adds unsaved buffers</text></svg>

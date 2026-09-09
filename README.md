@@ -1,8 +1,12 @@
 # Editor LSP Bridge
 
+[![Rust](https://img.shields.io/badge/Rust-282828?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/) [![Tokio](https://img.shields.io/badge/Tokio-282828?style=flat-square)](https://tokio.rs/) [![LSP](https://img.shields.io/badge/Language%20Server%20Protocol-525252?style=flat-square)](https://microsoft.github.io/language-server-protocol/) [![Downloads](https://img.shields.io/badge/macOS%20%7C%20Linux-downloads-525252?style=flat-square)](https://github.com/pumuckelo/mcp-editor-lsp-bridge/releases)
+
 Rust and TypeScript language intelligence for coding agents. Run one local core, then use the `bridge` CLI for navigation, diagnostics and cross-file refactoring. Agents share a language server per workspace.
 
 Supports **rust-analyzer** and the **native TypeScript 7 LSP**, including JavaScript. An optional Zed companion adds unsaved editor buffers.
+
+![Agent CLI → shared local core → Rust and TypeScript language servers](docs/assets/overview.svg)
 
 ## Install
 
