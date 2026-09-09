@@ -255,9 +255,9 @@ Update the package version, commit and push the changes, then push a matching `v
 After committing the version and release changes, run from this repository:
 
 ```sh
-cargo release              # create the version tag and push it to GitHub
+cargo release              # bump if needed, commit the version, push branch and tag
 ```
 
-Tag creation requires a clean checkout. Repeating it is safe when the tag already points to the current commit; an existing tag is never moved. For subsequent releases, bump the package version first. The Rust release helper creates and pushes the tag directly. If pushing fails, rerun `cargo release` to retry.
+Release requires a clean checkout and a branch. The helper fetches tags from origin. If the current version already tags an older commit, it selects the next unused patch version, updates Cargo.toml and Cargo.lock, and commits that version change. It then pushes the branch and tag together atomically. Existing tags are never moved. Repeating a release at the same commit reuses its tag; after a failed push, rerun `cargo release`. Set major, minor, or prerelease versions manually when needed.
 
 Installer sources live in `scripts/installer/`; `scripts/install.sh` loads them when run from a checkout. `sh scripts/bundle-installer.sh > install.sh` produces the standalone release installer. Edit the source modules, not generated bundles.
