@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "id": "30iRBkCUkkuY_43dy0sec",
+  "title": "02 — Implement standalone rust-analyzer sessions",
+  "description": "Depends on task 01. Implement executable-based LSP client and saved-file synchronization. Follow PLAN.md diagnostics and configuration decisions.",
+  "stage": "reviewing",
+  "status": "done",
+  "revision": 3,
+  "createdAt": "2026-09-09T04:59:57.359Z",
+  "updatedAt": "2026-09-09T05:31:41.159Z",
+  "todos": [
+    {
+      "id": "3ID-Km8b7Vez_SSYBAUE9",
+      "title": "Implement initialize, server requests, cancellation, shutdown, and useful errors",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "qWtUWQ24Z6xS1_ioqk7r_",
+      "title": "Synchronize queried documents and filesystem changes including create/delete",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "fUMuKNG0_0sgUQLrXdYRd",
+      "title": "Track diagnostics readiness, freshness, and Cargo check progress",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "ADXLgTmcVaOpfMFKbSDAR",
+      "title": "Expose toolchain, target, features, and analyzer configuration",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "8JVJLU1pvGq5nPWZNIgpH",
+      "title": "Verify disk changes and separate worktree directories",
+      "status": "done",
+      "stage": "implementing"
+    }
+  ],
+  "findings": [],
+  "notes": [
+    {
+      "id": "0WlZDPLMejT7L5oLAJ-au",
+      "text": "Core, analyzer transport, disk synchronization and shared explicit Cargo checks implemented. Real analyzer integration passes definitions, overlays, disk precedence, rename, watcher, compiler diagnostics, and shared HTTP MCP clients. Remaining: broader companion/reconnect and UI validation.",
+      "createdAt": "2026-09-09T05:20:20.173Z"
+    },
+    {
+      "id": "1-pKc_fohhFl0FJVwoi23",
+      "text": "Implemented bidirectional LSP transport, watched saved files, live document state, diagnostics freshness and shared Cargo checks. Real rust-analyzer integration passes disk changes, compiler errors and distinct directory sessions. Automatic checks debounce saved changes; configuration is explicit.",
+      "createdAt": "2026-09-09T05:31:41.159Z"
+    }
+  ],
+  "history": [
+    {
+      "id": "pA5cYOCxOQniP-Be3CFMg",
+      "revision": 1,
+      "at": "2026-09-09T04:59:57.359Z",
+      "changes": [
+        "Task created"
+      ]
+    },
+    {
+      "id": "STBy49DnBBq12ivvG_t6w",
+      "revision": 2,
+      "at": "2026-09-09T05:20:20.173Z",
+      "changes": [
+        "Stage: implementing",
+        "Status: active",
+        "Progress note added"
+      ]
+    },
+    {
+      "id": "8Y0NWA4Zafz-ve3MVtGbT",
+      "revision": 3,
+      "at": "2026-09-09T05:31:41.159Z",
+      "changes": [
+        "Stage: reviewing",
+        "Todo completed: Implement initialize, server requests, cancellation, shutdown, and useful errors",
+        "Todo completed: Synchronize queried documents and filesystem changes including create/delete",
+        "Todo completed: Track diagnostics readiness, freshness, and Cargo check progress",
+        "Todo completed: Expose toolchain, target, features, and analyzer configuration",
+        "Todo completed: Verify disk changes and separate worktree directories",
+        "Progress note added",
+        "Status: done"
+      ]
+    }
+  ]
+}

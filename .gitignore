@@ -1,0 +1,7 @@
+/target
+/zed-extension/target
+/zed-extension/extension.wasm
+.DS_Store
+
+**/target/
+/examples/demo/.zed/settings.json

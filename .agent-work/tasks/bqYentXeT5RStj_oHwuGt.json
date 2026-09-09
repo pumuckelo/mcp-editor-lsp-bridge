@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "id": "bqYentXeT5RStj_oHwuGt",
+  "title": "01 — Build Rust core and shared MCP endpoint",
+  "description": "Implement PLAN.md core architecture. One persistent Rust process owns a shared local HTTP MCP endpoint and workspace sessions; clients attach without spawning servers per agent. Define editor-neutral document synchronization messages. Dependencies: none.",
+  "stage": "reviewing",
+  "status": "done",
+  "revision": 4,
+  "createdAt": "2026-09-09T04:59:53.525Z",
+  "updatedAt": "2026-09-09T05:31:36.964Z",
+  "todos": [
+    {
+      "id": "AdoPl0JIDw8w9l7g8DjNN",
+      "title": "Scaffold Rust project and configuration",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "7rpIJ-NF5o-gnogY3t5XY",
+      "title": "Implement shared MCP endpoint and workspace registry keyed by directory",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "B7h1W1Kjy2RakWiaOrUoF",
+      "title": "Define companion registration, snapshots, versions, and disconnect contract",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "tWokTbIZK-Qfnq8HYjJYa",
+      "title": "Verify two clients reuse one workspace session",
+      "status": "done",
+      "stage": "implementing"
+    }
+  ],
+  "findings": [],
+  "notes": [
+    {
+      "id": "7c-gsl0tJS-16o_A3_cxA",
+      "text": "Planning handoff: PLAN.md records the accepted architecture and deferred scope. Project initialized and registered; six ordered implementation tasks created. Agent disk edits take precedence over unsaved editor state. Only Zed companion now; no switching, resource policies, or transactional stale-edit safeguards. Next: implement this core task, then 30iRBk; validate rCzo5Q early. No implementation has started.",
+      "createdAt": "2026-09-09T05:00:24.939Z"
+    },
+    {
+      "id": "UsSoHTdweeq93GYzRLPmi",
+      "text": "Implemented Rust core, shared Streamable HTTP MCP endpoint, workspace registry and editor-neutral sync contract. Real integration confirms two MCP clients share the same analyzer. README and docs/companion-protocol.md document setup.",
+      "createdAt": "2026-09-09T05:31:36.964Z"
+    }
+  ],
+  "history": [
+    {
+      "id": "I1Lufz6HkLcoKdt5Kl3zc",
+      "revision": 1,
+      "at": "2026-09-09T04:59:53.525Z",
+      "changes": [
+        "Task created"
+      ]
+    },
+    {
+      "id": "CD2WRbpdsqZLfryJ68nUz",
+      "revision": 2,
+      "at": "2026-09-09T05:00:24.939Z",
+      "changes": [
+        "Progress note added"
+      ]
+    },
+    {
+      "id": "a4dOsb6zJbj45JzbgIvFt",
+      "revision": 3,
+      "at": "2026-09-09T05:02:04.677Z",
+      "changes": [
+        "Stage: implementing",
+        "Status: active"
+      ]
+    },
+    {
+      "id": "33oDNniwNztjM21-OqpZK",
+      "revision": 4,
+      "at": "2026-09-09T05:31:36.964Z",
+      "changes": [
+        "Stage: reviewing",
+        "Todo completed: Scaffold Rust project and configuration",
+        "Todo completed: Implement shared MCP endpoint and workspace registry keyed by directory",
+        "Todo completed: Define companion registration, snapshots, versions, and disconnect contract",
+        "Todo completed: Verify two clients reuse one workspace session",
+        "Progress note added",
+        "Status: done"
+      ]
+    }
+  ]
+}

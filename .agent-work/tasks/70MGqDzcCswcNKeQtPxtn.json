@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "id": "70MGqDzcCswcNKeQtPxtn",
+  "title": "05 — Add minimal local management UI",
+  "description": "Depends on core/status and Zed connection APIs. Static web assets served by Rust; Vite only for building/development. Follow PLAN.md scope; no resource policies or companion selection workflow.",
+  "stage": "reviewing",
+  "status": "done",
+  "revision": 2,
+  "createdAt": "2026-09-09T05:00:07.393Z",
+  "updatedAt": "2026-09-09T05:31:49.330Z",
+  "todos": [
+    {
+      "id": "EYTbB2TG7IApVfK0K3W0H",
+      "title": "Display workspaces and analyzer readiness/check status",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "yYpM56ArONWGMDGOGpmS4",
+      "title": "Show Zed connection and document state source",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "E151fH9ODpi0DDVi4Pscz",
+      "title": "Display diagnostics freshness and effective workspace configuration",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "_L3TXVlz_2NSeDEZnQqgm",
+      "title": "Build and serve frontend without a production Node process",
+      "status": "done",
+      "stage": "implementing"
+    }
+  ],
+  "findings": [],
+  "notes": [
+    {
+      "id": "AhEStQSqSNPwLN-em8moj",
+      "text": "Implemented static embedded dashboard; no Node runtime or build tooling needed. Browser verification successfully attached examples/demo and displayed analyzer readiness and configuration. Screenshot inspected for layout.",
+      "createdAt": "2026-09-09T05:31:49.330Z"
+    }
+  ],
+  "history": [
+    {
+      "id": "RQX3YzCGxOSEO9k7SCcOd",
+      "revision": 1,
+      "at": "2026-09-09T05:00:07.393Z",
+      "changes": [
+        "Task created"
+      ]
+    },
+    {
+      "id": "zc8GFaeYpEZn5v8lQkCwH",
+      "revision": 2,
+      "at": "2026-09-09T05:31:49.330Z",
+      "changes": [
+        "Stage: reviewing",
+        "Todo completed: Display workspaces and analyzer readiness/check status",
+        "Todo completed: Show Zed connection and document state source",
+        "Todo completed: Display diagnostics freshness and effective workspace configuration",
+        "Todo completed: Build and serve frontend without a production Node process",
+        "Progress note added",
+        "Status: done"
+      ]
+    }
+  ]
+}

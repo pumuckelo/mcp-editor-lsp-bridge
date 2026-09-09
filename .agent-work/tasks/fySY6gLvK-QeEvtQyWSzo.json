@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "id": "fySY6gLvK-QeEvtQyWSzo",
+  "title": "06 — Validate MVP and document usage",
+  "description": "Depends on tasks 01–05. Complete meaningful end-to-end validation and document actual supported behavior and limitations. Do not expand deferred scope.",
+  "stage": "reviewing",
+  "status": "active",
+  "revision": 2,
+  "createdAt": "2026-09-09T05:00:10.756Z",
+  "updatedAt": "2026-09-09T05:31:57.329Z",
+  "todos": [
+    {
+      "id": "hYi6T7S18aRqG9bXoxLlK",
+      "title": "Validate standalone and Zed-assisted workflows with a Rust fixture",
+      "status": "pending",
+      "stage": "implementing"
+    },
+    {
+      "id": "z-MzrO0dmgOPL-iemKOof",
+      "title": "Verify multiple agents share one analyzer and worktrees stay isolated",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "_psodhutNx0DKMenj0f36",
+      "title": "Verify agent edits take precedence and diagnostics never imply false success",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "QPt-4updjNIJtny57vPLs",
+      "title": "Document install, shared MCP connection, Zed setup, configuration, and recovery",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "Nf7-Oo-1IJKDoGZcSD-iJ",
+      "title": "Record checks and next steps in SDS",
+      "status": "done",
+      "stage": "implementing"
+    }
+  ],
+  "findings": [],
+  "notes": [
+    {
+      "id": "C_UcjlsmUr20OFGj6Yoy9",
+      "text": "README, companion protocol, demo and manual validation guide written. Automated real-analyzer integration covers HTTP clients, refactoring, compiler checks, filesystem watching, companion process and distinct workspaces. Live Zed validation awaits user's manual test; do not mark fully validated until it succeeds.",
+      "createdAt": "2026-09-09T05:31:57.329Z"
+    }
+  ],
+  "history": [
+    {
+      "id": "hgE5LFwDDyTl1ngEuQrib",
+      "revision": 1,
+      "at": "2026-09-09T05:00:10.756Z",
+      "changes": [
+        "Task created"
+      ]
+    },
+    {
+      "id": "Tx2_Y2WA80XqLEVNQoqRV",
+      "revision": 2,
+      "at": "2026-09-09T05:31:57.329Z",
+      "changes": [
+        "Stage: reviewing",
+        "Todo completed: Verify multiple agents share one analyzer and worktrees stay isolated",
+        "Todo completed: Verify agent edits take precedence and diagnostics never imply false success",
+        "Todo completed: Document install, shared MCP connection, Zed setup, configuration, and recovery",
+        "Todo completed: Record checks and next steps in SDS",
+        "Progress note added",
+        "Status: active"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+[package]
+name = "mcp-editor-lsp-bridge"
+version = "0.1.0"
+edition = "2024"
+default-run = "mcp-editor-lsp-bridge"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+clap = { version = "4", features = ["derive", "string"] }
+notify = "8"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+rmcp = { version = "3", features = ["server", "transport-streamable-http-server"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[workspace]
+exclude = ["zed-extension"]
+
+[[bin]]
+name = "bridge"
+path = "src/bin/bridge.rs"

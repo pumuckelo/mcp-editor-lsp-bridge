@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "id": "k9BJPbnKj2S9tGj-vtI0w",
+  "title": "03 — Expose semantic MCP tools and refactoring",
+  "description": "Depends on task 02. Implement PLAN.md tool surface with compact results. Agent changes on disk are authoritative; no dirty-buffer blocking or advanced stale-edit safeguards in MVP.",
+  "stage": "reviewing",
+  "status": "done",
+  "revision": 2,
+  "createdAt": "2026-09-09T05:00:00.875Z",
+  "updatedAt": "2026-09-09T05:31:45.030Z",
+  "todos": [
+    {
+      "id": "5o_T8I-T8gtT71YC8f8PC",
+      "title": "Add symbols, definitions, references, hover, and workspace status",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "AhOCMn213S_PH4efQ0aAS",
+      "title": "Add diagnostics retrieval and explicit waiting/checking semantics",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "AuUhWoZZSYcTq6W4k-8-R",
+      "title": "Implement rename and supported code actions with workspace edits",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "02N-zMExe966i3Jmq2kTZ",
+      "title": "Synchronize disk mutations immediately and supersede conflicting editor overlays",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "ASbwvJPJcK1HvVtHSFJ28",
+      "title": "Verify multi-file rename and representative code actions",
+      "status": "done",
+      "stage": "implementing"
+    }
+  ],
+  "findings": [],
+  "notes": [
+    {
+      "id": "auV-_Fm-i9lNO0fLltHmR",
+      "text": "Implemented ten MCP tools including symbols, definitions, references, hover, diagnostics, rename and code actions. Real integration verifies multi-file rename and a resolved hexadecimal conversion action. Command/resource operations fail explicitly before applying edits.",
+      "createdAt": "2026-09-09T05:31:45.030Z"
+    }
+  ],
+  "history": [
+    {
+      "id": "4ccIQAHCh-gf8dH5pJUuN",
+      "revision": 1,
+      "at": "2026-09-09T05:00:00.875Z",
+      "changes": [
+        "Task created"
+      ]
+    },
+    {
+      "id": "L2gKkZIyULFfqMNBXY5QX",
+      "revision": 2,
+      "at": "2026-09-09T05:31:45.030Z",
+      "changes": [
+        "Stage: reviewing",
+        "Todo completed: Add symbols, definitions, references, hover, and workspace status",
+        "Todo completed: Add diagnostics retrieval and explicit waiting/checking semantics",
+        "Todo completed: Implement rename and supported code actions with workspace edits",
+        "Todo completed: Synchronize disk mutations immediately and supersede conflicting editor overlays",
+        "Todo completed: Verify multi-file rename and representative code actions",
+        "Progress note added",
+        "Status: done"
+      ]
+    }
+  ]
+}

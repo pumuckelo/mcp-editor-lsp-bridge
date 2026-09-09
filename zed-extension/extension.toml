@@ -1,0 +1,10 @@
+id = "editor-lsp-bridge"
+name = "Editor LSP Bridge"
+version = "0.1.0"
+schema_version = 1
+authors = ["abdou"]
+description = "Synchronize Rust editor buffers with a local MCP editor bridge."
+
+[language_servers.editor-lsp-bridge]
+name = "Editor LSP Bridge"
+languages = ["Rust"]

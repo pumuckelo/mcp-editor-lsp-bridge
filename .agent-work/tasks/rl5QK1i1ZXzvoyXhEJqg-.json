@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "id": "rl5QK1i1ZXzvoyXhEJqg-",
+  "title": "Add shared application port and CLI for editor LSP bridge",
+  "description": "Extract semantic operations and action cache from MCP into a typed application service. Add HTTP inbound adapter and thin CLI client with flags, JSON/stdin, workspace inference, schemas and shared results. Verify real analyzer and cross-adapter action IDs.",
+  "stage": "reviewing",
+  "status": "done",
+  "revision": 5,
+  "createdAt": "2026-09-09T05:56:47.311Z",
+  "updatedAt": "2026-09-09T06:08:43.968Z",
+  "todos": [
+    {
+      "id": "biM5g3dYkxb4jT4viXbGO",
+      "title": "Extract typed application service and shared operation schemas",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "IQXxuWI1nD-2NZGeWVawO",
+      "title": "Add HTTP adapter and CLI client with workspace inference",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "qyl5QfSsd_s_v9PUps5k6",
+      "title": "Verify CLI, MCP parity and real analyzer integration",
+      "status": "done",
+      "stage": "reviewing"
+    },
+    {
+      "id": "6FDMG_Qtw4WGJ-0oAvBWA",
+      "title": "Document and install the CLI",
+      "status": "done",
+      "stage": "reviewing"
+    },
+    {
+      "id": "R1xoFVBfXLdkr7If32xyE",
+      "title": "Create concise shared agent skill for MCP and CLI",
+      "status": "done",
+      "stage": "implementing"
+    }
+  ],
+  "findings": [],
+  "notes": [
+    {
+      "id": "m5zSIVxNrhT3m0zje7j4U",
+      "text": "Shared typed Application now owns semantic dispatch and action cache; MCP and HTTP use the same instance and generated schemas. CLI supports flags, JSON/stdin, Cargo workspace inference and structured errors. Real-analyzer integration passed, including shared analyzer PID and applying code actions across MCP/CLI in both directions. Finishing full checks, release installation and live-core verification.",
+      "createdAt": "2026-09-09T06:05:06.986Z"
+    },
+    {
+      "id": "X_b_SMjG2VU-Oj0fFD1Nq",
+      "text": "Full cargo test, clippy -D warnings, real-analyzer integration and release build passed. Installed bridge and mcp-editor-lsp-bridge via cargo install. Restarted the existing core; installed CLI returned ready=true and a connected Zed companion. Live stdin symbols query succeeded. Demo contains a user test syntax error, correctly reported and left intact.",
+      "createdAt": "2026-09-09T06:07:19.296Z"
+    },
+    {
+      "id": "KF85zJpDO2Jb7-4moRk7N",
+      "text": "Documentation and installation complete. Concise repository-maintained skill linked into ~/.codex/skills and ~/.pi/agent/skills; skill-creator validator passed using available Anaconda Python. CLI and core are live on port 47831, Zed companion connected. All requested implementation and verification complete; no Zed extension rebuild required.",
+      "createdAt": "2026-09-09T06:08:43.968Z"
+    }
+  ],
+  "history": [
+    {
+      "id": "ydlzDeQlj1tLbvGoDZ6kb",
+      "revision": 1,
+      "at": "2026-09-09T05:56:47.311Z",
+      "changes": [
+        "Task created"
+      ]
+    },
+    {
+      "id": "FH-EEkvXxJ7PJEfsg3Jqj",
+      "revision": 2,
+      "at": "2026-09-09T05:57:11.276Z",
+      "changes": [
+        "Stage: implementing",
+        "Status: active"
+      ]
+    },
+    {
+      "id": "zFmKJsdBXi_4107NFaUpT",
+      "revision": 3,
+      "at": "2026-09-09T06:05:06.986Z",
+      "changes": [
+        "Todo completed: Extract typed application service and shared operation schemas",
+        "Todo completed: Add HTTP adapter and CLI client with workspace inference",
+        "Stage: reviewing",
+        "Progress note added"
+      ]
+    },
+    {
+      "id": "UF9btidKBnwNaWgwdx_6u",
+      "revision": 4,
+      "at": "2026-09-09T06:07:19.296Z",
+      "changes": [
+        "Todo completed: Verify CLI, MCP parity and real analyzer integration",
+        "Todo added: Create concise shared agent skill for MCP and CLI",
+        "Progress note added"
+      ]
+    },
+    {
+      "id": "-B4gfXkb_R3V8UK-eODx8",
+      "revision": 5,
+      "at": "2026-09-09T06:08:43.968Z",
+      "changes": [
+        "Todo completed: Document and install the CLI",
+        "Todo completed: Create concise shared agent skill for MCP and CLI",
+        "Progress note added",
+        "Status: done"
+      ]
+    }
+  ]
+}

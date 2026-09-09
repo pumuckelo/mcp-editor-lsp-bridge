@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "id": "rCzo5QH0D6HjCrMZrhJ6F",
+  "title": "04 — Build Zed synchronization companion",
+  "description": "Depends on tasks 01 and 02; integrate with 03. Register a lightweight companion LSP for Rust alongside Zed rust-analyzer. No proxy, third analyzer, VS Code implementation, or companion switching. Validate against real Zed early.",
+  "stage": "reviewing",
+  "status": "active",
+  "revision": 3,
+  "createdAt": "2026-09-09T05:00:03.269Z",
+  "updatedAt": "2026-09-09T05:33:29.034Z",
+  "todos": [
+    {
+      "id": "Lhmwos57Z5RCn-WQJQNfO",
+      "title": "Create Zed extension and companion executable mode",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "ooK38-Fzzsbqr0rf_A9Y2",
+      "title": "Forward open/change/save/close and maintain full editor snapshots",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "1WkLXZTOrZbfmTKYtbIgo",
+      "title": "Handle initial connection, reconnect, and disk fallback on disconnect",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "xZ4UgHtVVVAYkH2hqDfc8",
+      "title": "Implement disk-authoritative precedence without replaying stale editor deltas",
+      "status": "done",
+      "stage": "implementing"
+    },
+    {
+      "id": "yCiTozggA_OVIIPNTTCP6",
+      "title": "Verify unsaved changes, dirty-buffer agent edits, and Unicode positions in Zed",
+      "status": "pending",
+      "stage": "implementing"
+    }
+  ],
+  "findings": [],
+  "notes": [
+    {
+      "id": "7iyogBcaSxLIVqO3Aw_W8",
+      "text": "Zed extension builds for wasm32-wasip1. Actual companion subprocess passes open/change/exit and disk fallback tests. Native Zed automation cannot reliably operate keyboard/menu actions; user offered manual testing and was given the extension installation path. Next: open examples/demo in Zed and verify unsaved state reaches core.",
+      "createdAt": "2026-09-09T05:31:53.367Z"
+    },
+    {
+      "id": "BabW_qC4B0ZAPsoeEHt3L",
+      "text": "Final automated companion integration passes, including clean exit and reconnect without replaying a superseded editor snapshot. WebAssembly release build and extension clippy pass. Release core is running in SAAHT session editor-lsp-bridge at http://127.0.0.1:47831 with examples/demo attached and a fresh successful Cargo check. Next: user installs zed-extension and opens examples/demo as a Zed workspace for the remaining live test.",
+      "createdAt": "2026-09-09T05:33:29.034Z"
+    }
+  ],
+  "history": [
+    {
+      "id": "EslKAnizXME_cIasuET_y",
+      "revision": 1,
+      "at": "2026-09-09T05:00:03.269Z",
+      "changes": [
+        "Task created"
+      ]
+    },
+    {
+      "id": "T8lL-Z135KqNTbQz9M3LX",
+      "revision": 2,
+      "at": "2026-09-09T05:31:53.367Z",
+      "changes": [
+        "Stage: reviewing",
+        "Todo completed: Create Zed extension and companion executable mode",
+        "Todo completed: Forward open/change/save/close and maintain full editor snapshots",
+        "Todo completed: Handle initial connection, reconnect, and disk fallback on disconnect",
+        "Todo completed: Implement disk-authoritative precedence without replaying stale editor deltas",
+        "Progress note added",
+        "Status: active"
+      ]
+    },
+    {
+      "id": "DpVcMA8Pgz16gDQ9_dxXs",
+      "revision": 3,
+      "at": "2026-09-09T05:33:29.034Z",
+      "changes": [
+        "Progress note added"
+      ]
+    }
+  ]
+}
