@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "id": "rCzo5QH0D6HjCrMZrhJ6F",
   "title": "04 — Build Zed synchronization companion",
-  "description": "Depends on tasks 01 and 02; integrate with 03. Register a lightweight companion LSP for Rust alongside Zed rust-analyzer. No proxy, third analyzer, VS Code implementation, or companion switching. Validate against real Zed early.",
+  "description": "Register a lightweight companion LSP for Rust alongside Zed rust-analyzer. No proxy, third analyzer, VS Code implementation, or companion switching. Validate against real Zed early.",
   "stage": "reviewing",
   "status": "active",
-  "revision": 3,
+  "revision": 4,
   "createdAt": "2026-09-09T05:00:03.269Z",
-  "updatedAt": "2026-09-09T05:33:29.034Z",
+  "updatedAt": "2026-09-09T08:47:38.499Z",
   "todos": [
     {
       "id": "Lhmwos57Z5RCn-WQJQNfO",
@@ -83,6 +83,20 @@
       "changes": [
         "Progress note added"
       ]
+    },
+    {
+      "id": "1PwK4IbMj52PxcucrSKBV",
+      "revision": 4,
+      "at": "2026-09-09T08:47:38.499Z",
+      "changes": [
+        "Dependencies: bqYentXeT5RStj_oHwuGt, 30iRBkCUkkuY_43dy0sec, k9BJPbnKj2S9tGj-vtI0w",
+        "Description updated"
+      ]
     }
+  ],
+  "dependencyIds": [
+    "bqYentXeT5RStj_oHwuGt",
+    "30iRBkCUkkuY_43dy0sec",
+    "k9BJPbnKj2S9tGj-vtI0w"
   ]
 }

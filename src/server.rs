@@ -33,6 +33,33 @@ pub fn router(core: Arc<Core>, port: u16) -> Router {
             get(|| async { Html(include_str!("../web/index.html")) }),
         )
         .route(
+            "/logo.svg",
+            get(|| async {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+                    include_str!("../web/logo.svg"),
+                )
+            }),
+        )
+        .route(
+            "/rust.svg",
+            get(|| async {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+                    include_str!("../web/rust.svg"),
+                )
+            }),
+        )
+        .route(
+            "/typescript.svg",
+            get(|| async {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+                    include_str!("../web/typescript.svg"),
+                )
+            }),
+        )
+        .route(
             "/api/execute",
             post(
                 move |body: Result<
