@@ -252,4 +252,12 @@ The GitHub Actions release workflow builds macOS and Linux executables for ARM64
 
 Update the package version, commit and push the changes, then push a matching `vX.Y.Z` tag. The workflow checks the tag against `Cargo.toml`. GitHub's built-in token publishes the release; no npm account or separate publishing secret is required. The installer attached to the release is an asset for users, not a command executed by the publish step.
 
+After committing the version and release changes, run from this repository:
+
+```sh
+cargo release              # create the version tag and push it to GitHub
+```
+
+Tag creation requires a clean checkout. Repeating it is safe when the tag already points to the current commit; an existing tag is never moved. For subsequent releases, bump the package version first. The Rust release helper creates and pushes the tag directly. If pushing fails, rerun `cargo release` to retry.
+
 Installer sources live in `scripts/installer/`; `scripts/install.sh` loads them when run from a checkout. `sh scripts/bundle-installer.sh > install.sh` produces the standalone release installer. Edit the source modules, not generated bundles.

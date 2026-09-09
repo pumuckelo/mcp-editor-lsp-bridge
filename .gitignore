@@ -7,3 +7,5 @@
 /examples/demo/.zed/settings.json
 
 release/
+
+/tools/release/target/
