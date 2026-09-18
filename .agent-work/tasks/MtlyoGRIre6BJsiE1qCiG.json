@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "MtlyoGRIre6BJsiE1qCiG",
+  "title": "Support workspace TypeScript through vtsls",
+  "description": "",
+  "dependencyIds": [],
+  "stage": "planning",
+  "status": "done",
+  "revision": 4,
+  "createdAt": "2026-09-10T01:57:43.693Z",
+  "updatedAt": "2026-09-10T03:08:59.082Z",
+  "todos": [],
+  "findings": [],
+  "notes": [
+    {
+      "id": "q3jzLFRg7KiVIgMkYpdTS",
+      "text": "Implemented selectable auto/native/vtsls/typescript-language-server backends through config, CLI and dashboard. Workspace SDK pinned; compiler checks use project version. Backend switches preserve companion buffers and reject incompatible selection without stopping the old workspace. Fixed negotiated incremental sync. Full 12-test suite passed including real Rust, native TS7 and TS5 wrapper switching; separate TS6 wrapper integration passed. Clippy and dashboard script syntax passed.",
+      "createdAt": "2026-09-10T02:14:35.710Z"
+    },
+    {
+      "id": "eYv02z0gUUs2DG7OgHmng",
+      "text": "Moved backend selector beside analyzer name with explicit Apply and inline failure feedback; polling preserves expanded details and avoids replacing focused controls. Dashboard syntax and served markup verified. Investigated reported Next.js noise: saved-file compiler check follows root tsconfig broad includes, unlike open-file editor diagnostics. Project exclusions unchanged.",
+      "createdAt": "2026-09-10T03:08:59.082Z"
+    }
+  ],
+  "history": [
+    {
+      "id": "x6r99MwIqZdH2s6dvOxFQ",
+      "revision": 1,
+      "at": "2026-09-10T01:57:43.693Z",
+      "changes": [
+        "Task created"
+      ]
+    },
+    {
+      "id": "GF6SFcUrd2HTE3EmvzGFp",
+      "revision": 2,
+      "at": "2026-09-10T02:14:35.710Z",
+      "changes": [
+        "Progress note added"
+      ]
+    },
+    {
+      "id": "rUjS3vEE1g0xL2FPeyTvy",
+      "revision": 3,
+      "at": "2026-09-10T02:16:03.956Z",
+      "changes": [
+        "Status: done"
+      ]
+    },
+    {
+      "id": "iZ1xxgxfc5AFL2KnZZbsv",
+      "revision": 4,
+      "at": "2026-09-10T03:08:59.082Z",
+      "changes": [
+        "Progress note added"
+      ]
+    }
+  ]
+}

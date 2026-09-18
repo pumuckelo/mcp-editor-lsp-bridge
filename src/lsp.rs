@@ -23,6 +23,7 @@ pub struct AnalysisState {
     pub diagnostics: HashMap<String, Value>,
 }
 pub struct Lsp {
+    pub name: &'static str,
     writer: Mutex<ChildStdin>,
     child: Mutex<Child>,
     #[cfg(unix)]
@@ -54,10 +55,15 @@ impl Lsp {
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()
-            .with_context(|| format!("Start {binary}"))?;
+            .with_context(|| match spec.name {
+                "vtsls" => format!("Start {binary}. Install @vtsls/language-server (requires Node), or set vtsls_analyzer"),
+                "typescript-language-server" => format!("Start {binary}. Install typescript-language-server (requires Node), or set typescript_language_server"),
+                _ => format!("Start {binary}"),
+            })?;
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
         let server = Arc::new(Self {
+            name: spec.name,
             writer: Mutex::new(child.stdin.take().unwrap()),
             #[cfg(unix)]
             process_group: std::sync::Mutex::new(ProcessGroup(child.id().unwrap() as i32)),

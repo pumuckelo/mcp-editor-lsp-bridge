@@ -12,7 +12,21 @@ pub enum Language {
     TypeScript,
 }
 
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum TypeScriptBackend {
+    #[default]
+    Auto,
+    Native,
+    Vtsls,
+    #[serde(rename = "typescript-language-server")]
+    TypeScriptLanguageServer,
+}
+
 pub struct ServerSpec {
+    pub name: &'static str,
     pub command: String,
     pub args: Vec<String>,
     pub settings: Value,
@@ -53,7 +67,7 @@ impl Language {
             }
         })
     }
-    pub fn spec(self, root: &Path, config: &Config) -> Result<ServerSpec> {
+    pub async fn spec(self, root: &Path, config: &Config) -> Result<ServerSpec> {
         match self {
             Self::Rust => {
                 let mut settings = config.analyzer_settings.clone();
@@ -71,6 +85,7 @@ impl Language {
                     settings["cargo"]["target"] = json!(target);
                 }
                 Ok(ServerSpec {
+                    name: "rust-analyzer",
                     command: config.analyzer.clone(),
                     args: vec![],
                     settings,
@@ -78,35 +93,33 @@ impl Language {
                     server_status: true,
                 })
             }
-            Self::TypeScript => Ok(ServerSpec {
-                command: typescript_binary(root, config)?,
-                args: vec!["--lsp".into(), "--stdio".into()],
-                settings: config.typescript_settings.clone(),
-                section: "typescript",
-                server_status: false,
-            }),
+            Self::TypeScript => typescript_spec(root, config).await,
         }
     }
 }
-pub fn typescript_binary(root: &Path, config: &Config) -> Result<String> {
-    if let Some(binary) = &config.typescript_analyzer {
-        return Ok(binary.clone());
-    }
-    // Search hoisted dependencies, but never borrow an installation across a Git boundary.
+
+fn workspace_dependency(root: &Path, relative: &str) -> Option<PathBuf> {
     for dir in root.ancestors() {
-        let path = dir.join("node_modules/.bin/tsc");
+        let path = dir.join("node_modules").join(relative);
         if path.is_file() {
-            return Ok(path.to_string_lossy().into());
+            return Some(path);
         }
         if dir.join(".git").exists() {
             break;
         }
     }
-    bail!(
-        "Native TypeScript 7 not found. Install typescript@^7 in this workspace or set typescript_analyzer to its tsc executable"
-    )
+    None
 }
-pub async fn verify_typescript(binary: &str, root: &Path, config: &Config) -> Result<()> {
+
+/// Compiler selection is independent of the LSP wrapper. Prefer the project compiler.
+pub fn typescript_binary(root: &Path, config: &Config) -> Result<String> {
+    workspace_dependency(root, ".bin/tsc")
+        .map(|path| path.to_string_lossy().into_owned())
+        .or_else(|| config.typescript_analyzer.clone())
+        .context("TypeScript not found. Install the project's TypeScript dependencies first")
+}
+
+async fn typescript_version(binary: &str, root: &Path, config: &Config) -> Result<u32> {
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         tokio::process::Command::new(binary)
@@ -119,14 +132,106 @@ pub async fn verify_typescript(binary: &str, root: &Path, config: &Config) -> Re
     .await
     .context("TypeScript version check timed out")??;
     let version = String::from_utf8_lossy(&output.stdout);
-    if !output.status.success() || !version.trim().starts_with("Version 7.") {
+    if output.status.success()
+        && let Some(major) = version
+            .trim()
+            .strip_prefix("Version ")
+            .and_then(|v| v.split('.').next())
+            .and_then(|v| v.parse().ok())
+    {
+        return Ok(major);
+    }
+    bail!(
+        "Cannot determine TypeScript version at {binary}: {}",
+        version.trim()
+    )
+}
+
+async fn typescript_spec(root: &Path, config: &Config) -> Result<ServerSpec> {
+    let compiler = typescript_binary(root, config)?;
+    let major = typescript_version(&compiler, root, config).await?;
+    let backend = match config.typescript_backend {
+        TypeScriptBackend::Auto if major == 7 => TypeScriptBackend::Native,
+        TypeScriptBackend::Auto => TypeScriptBackend::Vtsls,
+        backend => backend,
+    };
+    if backend == TypeScriptBackend::Native {
+        if major != 7 {
+            bail!(
+                "Native LSP requires workspace TypeScript 7; select vtsls or typescript-language-server for TypeScript {major}"
+            );
+        }
+        let binary = config.typescript_analyzer.clone().unwrap_or(compiler);
+        if typescript_version(&binary, root, config).await? != 7 {
+            bail!("Configured typescript_analyzer must be native TypeScript 7");
+        }
+        return Ok(ServerSpec {
+            name: "native-typescript",
+            command: binary,
+            args: vec!["--lsp".into(), "--stdio".into()],
+            settings: config.typescript_settings.clone(),
+            section: "typescript",
+            server_status: false,
+        });
+    }
+    if !(4..=6).contains(&major) {
         bail!(
-            "Expected native TypeScript 7 at {binary}; got {}",
-            version.trim()
+            "The selected wrapper requires TypeScript 4–6, got {major}. Use auto or native for TypeScript 7"
         );
     }
-    Ok(())
+    let tsserver = workspace_dependency(root, "typescript/lib/tsserver.js")
+        .context("Workspace TypeScript tsserver.js not found. Install the project's dependencies; the wrapper must use the project SDK")?;
+    let tsdk = tsserver.parent().unwrap().canonicalize()?;
+    if backend == TypeScriptBackend::TypeScriptLanguageServer {
+        let mut settings = config.typescript_language_server_settings.clone();
+        if !settings.is_object() || settings.get("tsserver").is_some_and(|v| !v.is_object()) {
+            bail!("typescript_language_server_settings and its tsserver entry must be objects");
+        }
+        settings["tsserver"]["path"] = json!(tsdk.join("tsserver.js"));
+        return Ok(ServerSpec {
+            name: "typescript-language-server",
+            command: wrapper_binary(
+                root,
+                &config.typescript_language_server,
+                "typescript-language-server",
+            ),
+            args: vec!["--stdio".into()],
+            settings,
+            section: "typescript",
+            server_status: false,
+        });
+    }
+    let mut settings = config.vtsls_settings.clone();
+    if !settings.is_object() {
+        bail!("vtsls_settings must be an object");
+    }
+    for key in ["typescript", "vtsls"] {
+        if settings.get(key).is_some_and(|value| !value.is_object()) {
+            bail!("vtsls_settings.{key} must be an object");
+        }
+    }
+    settings["typescript"]["tsdk"] = json!(tsdk);
+    settings["vtsls"]["autoUseWorkspaceTsdk"] = json!(true);
+    Ok(ServerSpec {
+        name: "vtsls",
+        command: wrapper_binary(root, &config.vtsls_analyzer, "vtsls"),
+        args: vec!["--stdio".into()],
+        settings,
+        section: "",
+        server_status: false,
+    })
 }
+
+fn wrapper_binary(root: &Path, configured: &Option<String>, name: &str) -> String {
+    configured
+        .clone()
+        .or_else(|| {
+            workspace_dependency(root, &format!(".bin/{name}"))
+                .map(|p| p.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| name.into())
+}
+
 pub fn infer_root(cwd: &Path) -> Result<PathBuf> {
     for dir in cwd.ancestors() {
         if dir.join("Cargo.toml").is_file() {
@@ -189,16 +294,51 @@ mod tests {
     }
     #[tokio::test]
     #[cfg(unix)]
-    async fn reject_legacy_typescript() -> Result<()> {
+    async fn backend_selection_pins_workspace_sdk_and_compiler() -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let temp = tempfile::tempdir()?;
-        let binary = temp.path().join("tsc");
-        std::fs::write(&binary, "#!/bin/sh\necho 'Version 5.9.3'\n")?;
-        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755))?;
-        let error = verify_typescript(binary.to_str().unwrap(), temp.path(), &Config::default())
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("Expected native TypeScript 7"));
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("node_modules/.bin"))?;
+        std::fs::create_dir_all(root.join("node_modules/typescript/lib"))?;
+        let compiler = root.join("node_modules/.bin/tsc");
+        std::fs::write(&compiler, "#!/bin/sh\necho 'Version 5.9.3'\n")?;
+        std::fs::set_permissions(&compiler, std::fs::Permissions::from_mode(0o755))?;
+        std::fs::write(root.join("node_modules/typescript/lib/tsserver.js"), "")?;
+        let mut config = Config::default();
+        let spec = Language::TypeScript.spec(root, &config).await?;
+        assert_eq!(spec.name, "vtsls");
+        let sdk = root.join("node_modules/typescript/lib").canonicalize()?;
+        assert_eq!(spec.settings["typescript"]["tsdk"], json!(sdk));
+        assert_eq!(spec.settings["vtsls"]["autoUseWorkspaceTsdk"], true);
+        config.typescript_backend = TypeScriptBackend::TypeScriptLanguageServer;
+        config.typescript_language_server_settings =
+            json!({"tsserver":{"path":"/wrong/sdk", "useSyntaxServer":"never"}});
+        let spec = Language::TypeScript.spec(root, &config).await?;
+        assert_eq!(spec.name, "typescript-language-server");
+        assert_eq!(
+            spec.settings["tsserver"]["path"],
+            json!(sdk.join("tsserver.js"))
+        );
+        assert_eq!(spec.settings["tsserver"]["useSyntaxServer"], "never");
+        config.typescript_analyzer = Some("/unrelated/native/compiler".into());
+        assert_eq!(
+            typescript_binary(root, &config)?,
+            compiler.to_string_lossy()
+        );
+        config.typescript_backend = TypeScriptBackend::Native;
+        assert!(Language::TypeScript.spec(root, &config).await.is_err());
+        config.typescript_analyzer = None;
+        config.typescript_backend = TypeScriptBackend::Auto;
+        std::fs::write(&compiler, "#!/bin/sh\necho 'Version 7.0.2'\n")?;
+        assert_eq!(
+            Language::TypeScript.spec(root, &config).await?.name,
+            "native-typescript"
+        );
+        config.typescript_backend = TypeScriptBackend::Vtsls;
+        assert!(Language::TypeScript.spec(root, &config).await.is_err());
+        std::fs::create_dir_all(root.join("nested/src"))?;
+        std::fs::write(root.join("nested/.git"), "gitdir: elsewhere")?;
+        assert!(typescript_binary(&root.join("nested/src"), &Config::default()).is_err());
         Ok(())
     }
 }

@@ -29,6 +29,30 @@ async fn cli(root: &Path, endpoint: &str, args: &[&str]) -> Result<Value> {
 async fn native_typescript_cli_and_companion() -> Result<()> {
     let binary =
         std::env::var("BRIDGE_TYPESCRIPT").context("Set BRIDGE_TYPESCRIPT to TypeScript 7 tsc")?;
+    exercise_typescript(binary, Config::default(), None).await
+}
+
+#[tokio::test]
+#[ignore = "Requires BRIDGE_TYPESCRIPT_PACKAGE, BRIDGE_VTSLS, BRIDGE_TSLS, rust-analyzer and local sockets"]
+async fn legacy_typescript_backends_and_switching() -> Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_test_writer()
+        .try_init();
+    let package = std::env::var("BRIDGE_TYPESCRIPT_PACKAGE")?;
+    let config = Config {
+        vtsls_analyzer: Some(std::env::var("BRIDGE_VTSLS")?),
+        typescript_language_server: Some(std::env::var("BRIDGE_TSLS")?),
+        ..Config::default()
+    };
+    exercise_typescript(format!("{package}/bin/tsc"), config, Some(package)).await
+}
+
+async fn exercise_typescript(
+    binary: String,
+    config: Config,
+    package: Option<String>,
+) -> Result<()> {
     let temp = tempfile::tempdir()?;
     let root = temp.path().canonicalize()?;
     std::fs::create_dir_all(root.join("src"))?;
@@ -50,7 +74,11 @@ async fn native_typescript_cli_and_companion() -> Result<()> {
     )?;
     std::fs::write(root.join("src/view.tsx"), "export const view = 42;\n")?;
     std::fs::write(root.join("src/plain.jsx"), "export const plain = 42;\n")?;
-    let core = Core::new(Config::default());
+    if let Some(package) = &package {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(package, root.join("node_modules/typescript"))?;
+    }
+    let core = Core::new(config);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
     let app = server::router(core.clone(), port);
@@ -170,7 +198,7 @@ async fn native_typescript_cli_and_companion() -> Result<()> {
     assert!(symbols.to_string().contains("welcome"), "{symbols}");
     let checked = cli(&root, &endpoint, &["diagnostics", "--check"]).await?;
     assert_eq!(checked["savedFileCheck"]["success"], true, "{checked}");
-    let workspace = core.workspace(root.to_str().unwrap()).await?;
+    let mut workspace = core.workspace(root.to_str().unwrap()).await?;
     // Real companion executable forwards TS buffers through exactly the editor transport.
     use mcp_editor_lsp_bridge::protocol::{read_message, write_message};
     let mut companion = tokio::process::Command::new(env!("CARGO_BIN_EXE_bridge"))
@@ -202,13 +230,72 @@ async fn native_typescript_cli_and_companion() -> Result<()> {
         Ok::<_, anyhow::Error>(())
     })
     .await??;
-    let diagnostics = cli(&root, &endpoint, &["diagnostics"]).await?;
-    assert!(
-        diagnostics["liveDiagnostics"][&uri]["diagnostics"]
-            .as_array()
-            .is_some_and(|d| !d.is_empty()),
-        "{diagnostics}"
-    );
+    async fn wait_for_error(root: &Path, endpoint: &str, uri: &str) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let diagnostics = cli(root, endpoint, &["diagnostics"]).await?;
+                if diagnostics["liveDiagnostics"][uri]["diagnostics"]
+                    .as_array()
+                    .is_some_and(|d| !d.is_empty())
+                {
+                    return Ok::<_, anyhow::Error>(());
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await??;
+        Ok(())
+    }
+    wait_for_error(&root, &endpoint, &uri).await?;
+    if package.is_some() {
+        // Failed selection leaves the current analyzer and unsaved buffer intact.
+        assert!(
+            core.set_typescript_backend(
+                root.to_str().unwrap(),
+                mcp_editor_lsp_bridge::language::TypeScriptBackend::Native
+            )
+            .await
+            .is_err()
+        );
+        assert!(workspace.lsp.pid().await.is_some());
+        cli(
+            &root,
+            &endpoint,
+            &[
+                "workspace-backend",
+                "--backend",
+                "typescript-language-server",
+            ],
+        )
+        .await?;
+        workspace = core.workspace(root.to_str().unwrap()).await?;
+        assert!(workspace.status().await["companion"].is_string());
+        wait_for_error(&root, &endpoint, &uri).await?;
+        let renamed = cli(
+            &root,
+            &endpoint,
+            &[
+                "rename",
+                "--path",
+                "src/helper.ts",
+                "--symbol",
+                "welcome",
+                "--new-name",
+                "hello",
+            ],
+        )
+        .await?;
+        assert_eq!(renamed["applied"], true);
+        assert!(std::fs::read_to_string(root.join("src/main.ts"))?.contains("hello('world')"));
+        cli(
+            &root,
+            &endpoint,
+            &["workspace-backend", "--backend", "vtsls"],
+        )
+        .await?;
+        workspace = core.workspace(root.to_str().unwrap()).await?;
+        wait_for_error(&root, &endpoint, &uri).await?;
+    }
     assert!(std::fs::read_to_string(root.join("src/view.tsx"))?.contains("view = 42"));
     // Disk wins over the unsaved overlay; watcher refreshes the running TS server.
     std::fs::write(
@@ -304,6 +391,12 @@ async fn native_typescript_cli_and_companion() -> Result<()> {
     // Reconnecting now starts Rust first; opening TS adds only one TS server.
     let resumed = core.connect(root.to_str().unwrap()).await?;
     assert_eq!(resumed.status().await["language"], "rust");
+    if package.is_some() {
+        assert_eq!(
+            resumed.status().await["config"]["typescript_backend"],
+            "vtsls"
+        );
+    }
     resumed.open("src/helper.ts").await?;
     resumed.open("src/main.ts").await?;
     assert_eq!(

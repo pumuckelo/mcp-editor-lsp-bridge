@@ -29,6 +29,7 @@ macro_rules! input {
         pub struct $name { $(pub $field: $ty),* }
     };
 }
+input!(BackendInput { workspace: String, backend: crate::language::TypeScriptBackend, verbose: Option<bool> });
 input!(ConnectionInput { workspace: String, verbose: Option<bool> });
 input!(StatusInput { workspace: Option<String>, verbose: Option<bool> });
 input!(WorkspaceInput {
@@ -83,6 +84,7 @@ macro_rules! operations {
     };
 }
 operations! {
+    Backend(BackendInput) => ("workspace_backend", "Select TypeScript backend and restart a connected workspace, preserving editor buffers. Session-only; use config for a persistent default."),
     Connect(ConnectionInput) => ("workspace_connect", "Explicitly connect or resume a workspace analyzer."),
     Disconnect(ConnectionInput) => ("workspace_disconnect", "Stop a workspace analyzer and checks; block automatic reattachment until explicitly connected."),
     Status(StatusInput) => ("workspace_status", "List sessions, or attach a workspace and show analyzer, companion and check state."),
@@ -162,6 +164,12 @@ impl Application {
     }
     async fn dispatch(&self, request: Request) -> Result<Value> {
         match request {
+            Request::Backend(input) => Ok(output::status(
+                self.core
+                    .set_typescript_backend(&input.workspace, input.backend)
+                    .await?,
+                input.verbose.unwrap_or(false),
+            )),
             Request::Connect(input) => Ok(output::status(
                 self.core.connect(&input.workspace).await?.status().await,
                 input.verbose.unwrap_or(false),

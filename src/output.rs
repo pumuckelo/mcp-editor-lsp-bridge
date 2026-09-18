@@ -7,7 +7,7 @@ pub fn status(value: Value, verbose: bool) -> Value {
     if let Some(workspaces) = value["workspaces"].as_array() {
         return json!({"workspaces":workspaces.iter().cloned().map(|w| status(w, false)).collect::<Vec<_>>(),"disconnectedWorkspaces":value["disconnectedWorkspaces"]});
     }
-    json!({"workspace":value["workspace"],"language":value["language"],"ready":value["ready"],"status":value["status"],"analyzers":value["analyzers"],"analyzerPid":value["analyzerPid"],"companionConnected":value["companion"].is_string(),"documentCount":value["documents"].as_array().map_or(0, Vec::len),"generation":value["generation"],"checkFresh":value["checkFresh"],"checkRunning":value["check"]["running"],"checkSuccess":value["check"]["success"],"checkError":value["check"]["error"],"watcherError":value["watcherError"]})
+    json!({"workspace":value["workspace"],"language":value["language"],"typescriptBackend":value["config"]["typescript_backend"],"ready":value["ready"],"status":value["status"],"analyzers":value["analyzers"],"analyzerPid":value["analyzerPid"],"companionConnected":value["companion"].is_string(),"documentCount":value["documents"].as_array().map_or(0, Vec::len),"generation":value["generation"],"checkFresh":value["checkFresh"],"checkRunning":value["check"]["running"],"checkSuccess":value["check"]["success"],"checkError":value["check"]["error"],"watcherError":value["watcherError"]})
 }
 pub fn diagnostics(mut value: Value, verbose: bool) -> Value {
     if verbose {

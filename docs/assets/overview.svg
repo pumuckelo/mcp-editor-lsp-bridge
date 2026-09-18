@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="840" height="204" viewBox="0 0 840 204" role="img" aria-labelledby="title desc">
-<title id="title">Shared language intelligence for agents</title><desc id="desc">The bridge CLI connects to a persistent local core that manages rust-analyzer and native TypeScript 7. An optional Zed companion forwards unsaved buffers.</desc>
+<title id="title">Shared language intelligence for agents</title><desc id="desc">The bridge CLI connects to a persistent local core that manages rust-analyzer and the workspace TypeScript server. An optional Zed companion forwards unsaved buffers.</desc>
 <style>
 .box{fill:#fafafa;stroke:#d4d4d4} .label{fill:#171717;font:600 16px system-ui,sans-serif} .detail{fill:#525252;font:13px system-ui,sans-serif} .line{stroke:#a3a3a3;fill:none;stroke-width:1.5} .caption{fill:#737373;font:12px system-ui,sans-serif}
 @media(prefers-color-scheme:dark){.box{fill:#171717;stroke:#404040} .label{fill:#f5f5f5} .detail{fill:#bdbdbd} .caption{fill:#a3a3a3}}
@@ -19,7 +19,7 @@
 <rect class="box" x="596" y="32" width="228" height="112" rx="12"/>
 <rect x="616" y="54" width="24" height="3" rx="1.5" fill="#888888"/>
 <text class="label" x="616" y="84">Language servers</text>
-<text class="detail" x="616" y="108">rust-analyzer · TypeScript 7</text>
+<text class="detail" x="616" y="108">Rust · TypeScript</text>
 <text class="detail" x="616" y="128">Shared by agents</text>
 <path class="line" d="M254 88h42" marker-end="url(#arrow)"/>
 <path class="line" d="M544 88h42" marker-end="url(#arrow)"/>

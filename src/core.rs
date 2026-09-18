@@ -1,5 +1,5 @@
 use crate::{
-    language::{Language, verify_typescript},
+    language::{Language, TypeScriptBackend},
     lsp::Lsp,
     protocol::edit_text,
 };
@@ -25,6 +25,11 @@ pub struct Config {
     pub analyzer: String,
     pub typescript_analyzer: Option<String>,
     pub typescript_settings: Value,
+    pub typescript_backend: TypeScriptBackend,
+    pub typescript_language_server: Option<String>,
+    pub typescript_language_server_settings: Value,
+    pub vtsls_analyzer: Option<String>,
+    pub vtsls_settings: Value,
     pub analyzer_settings: Value,
     pub environment: HashMap<String, String>,
     pub cargo_features: Vec<String>,
@@ -38,6 +43,11 @@ impl Default for Config {
             analyzer: "rust-analyzer".into(),
             typescript_analyzer: None,
             typescript_settings: json!({}),
+            typescript_backend: TypeScriptBackend::Auto,
+            typescript_language_server: None,
+            typescript_language_server_settings: json!({}),
+            vtsls_analyzer: None,
+            vtsls_settings: json!({}),
             analyzer_settings: json!({}),
             environment: HashMap::new(),
             cargo_features: vec![],
@@ -52,6 +62,7 @@ pub struct Core {
     pub config: Config,
     disconnected: Mutex<BTreeSet<PathBuf>>,
     lifecycle: Mutex<()>,
+    backends: Mutex<BTreeMap<PathBuf, TypeScriptBackend>>,
 }
 impl Core {
     pub fn new(config: Config) -> Arc<Self> {
@@ -60,6 +71,7 @@ impl Core {
             config,
             disconnected: Mutex::new(BTreeSet::new()),
             lifecycle: Mutex::new(()),
+            backends: Mutex::new(BTreeMap::new()),
         })
     }
     pub async fn workspace(&self, path: &str) -> Result<Arc<Workspace>> {
@@ -85,10 +97,73 @@ impl Core {
         if let Some(workspace) = sessions.get(&root) {
             return Ok(workspace.clone());
         }
-        let workspace = Workspace::start(root.clone(), self.config.clone()).await?;
+        let mut config = self.config.clone();
+        if let Some(backend) = self.backends.lock().await.get(&root) {
+            config.typescript_backend = *backend;
+        }
+        let workspace = Workspace::start(root.clone(), config).await?;
         self.disconnected.lock().await.remove(&root);
         sessions.insert(root, workspace.clone());
         Ok(workspace)
+    }
+    /// Session overrides survive disconnect/reconnect, but not a core restart.
+    pub async fn set_typescript_backend(
+        &self,
+        path: &str,
+        backend: TypeScriptBackend,
+    ) -> Result<Value> {
+        let _lifecycle = self.lifecycle.lock().await;
+        if !Path::new(path).is_absolute() {
+            bail!("Workspace must be an absolute directory path");
+        }
+        let root = std::fs::canonicalize(path)?;
+        let old = self
+            .sessions
+            .lock()
+            .await
+            .get(&root)
+            .cloned()
+            .context("Connect the workspace before changing its backend")?;
+        if old.config.typescript_backend == backend {
+            return Ok(old.status().await);
+        }
+        let _edit = old.edit_lock.lock().await;
+        let snapshot = old.state.lock().await;
+        let mut config = old.config.clone();
+        config.typescript_backend = backend;
+        let replacement = Workspace::start(root.clone(), config).await?;
+        let restored = async {
+            replacement.language_server("__bridge_backend_probe.ts").await?;
+            for (uri, doc) in &snapshot.documents {
+                let lsp = replacement.language_server(uri).await?;
+                lsp.notify("textDocument/didOpen", json!({"textDocument":{"uri":uri,"languageId":Language::document_id(&replacement.path(uri)?)?,"version":doc.version,"text":doc.text}})).await?;
+            }
+            let mut state = replacement.state.lock().await;
+            state.documents = snapshot.documents.clone();
+            state.companion = snapshot.companion.clone();
+            state.companion_seen = snapshot.companion_seen;
+            state.generation += 1;
+            state.disk_hashes.clear();
+            drop(state);
+            // Reconcile disk writes that happened while the replacement started.
+            for uri in snapshot.documents.keys() {
+                replacement.disk_changed(&replacement.path(uri)?).await?;
+            }
+            Ok::<_, anyhow::Error>(())
+        }.await;
+        if let Err(error) = restored {
+            replacement.stop().await;
+            return Err(error);
+        }
+        drop(snapshot);
+        old.stop().await;
+        self.sessions
+            .lock()
+            .await
+            .insert(root.clone(), replacement.clone());
+        self.backends.lock().await.insert(root, backend);
+        replacement.schedule_check().await;
+        Ok(replacement.status().await)
     }
     pub async fn disconnect(&self, path: &str) -> Result<Value> {
         let _lifecycle = self.lifecycle.lock().await;
@@ -116,6 +191,7 @@ impl Core {
         }
     }
 }
+#[derive(Clone)]
 struct Document {
     text: String,
     disk: Option<String>,
@@ -157,10 +233,7 @@ pub struct Workspace {
 impl Workspace {
     async fn start(root: PathBuf, config: Config) -> Result<Arc<Self>> {
         let language = Language::default_for(&root)?;
-        let spec = language.spec(&root, &config)?;
-        if language == Language::TypeScript {
-            verify_typescript(&spec.command, &root, &config).await?;
-        }
+        let spec = language.spec(&root, &config).await?;
         let lsp = Lsp::start(&root, spec, &config.environment).await?;
         let workspace = Arc::new(Self {
             instance: uuid::Uuid::new_v4().to_string(),
@@ -251,10 +324,7 @@ impl Workspace {
         if let Some(server) = servers.get(&language) {
             return Ok(server.clone());
         }
-        let spec = language.spec(&self.root, &self.config)?;
-        if language == Language::TypeScript {
-            verify_typescript(&spec.command, &self.root, &self.config).await?;
-        }
+        let spec = language.spec(&self.root, &self.config).await?;
         let server = Lsp::start(&self.root, spec, &self.config.environment).await?;
         servers.insert(language, server.clone());
         drop(servers);
@@ -375,7 +445,10 @@ impl Workspace {
         if let Some(doc) = state.documents.get_mut(uri) {
             if doc.text != text {
                 doc.version += 1;
-                lsp.notify("textDocument/didChange", json!({"textDocument":{"uri":uri,"version":doc.version},"contentChanges":[{"text":text}]})).await?;
+                let sync = lsp.capabilities.read().await["textDocumentSync"].clone();
+                let incremental = sync.as_u64().or_else(|| sync["change"].as_u64()) == Some(2);
+                let change = crate::protocol::document_change(&doc.text, &text, incremental);
+                lsp.notify("textDocument/didChange", json!({"textDocument":{"uri":uri,"version":doc.version},"contentChanges":[change]})).await?;
                 doc.text = text;
                 lsp.state.write().await.diagnostics.remove(uri);
             }
@@ -482,7 +555,7 @@ impl Workspace {
             value["analyzer_settings"]["checkOnSave"] = json!(false);
         }
         value["compilerChecks"] = json!(
-            "Shared core runs Cargo and/or native TypeScript checks for active languages after disk changes or explicit diagnostics(check=true)"
+            "Shared core runs Cargo and/or workspace TypeScript checks for active languages after disk changes or explicit diagnostics(check=true)"
         );
         value
     }
@@ -497,7 +570,7 @@ impl Workspace {
         let mut analyzers = vec![];
         for (language, server) in servers {
             let analysis = server.state.read().await;
-            analyzers.push(json!({"language":language,"pid":server.pid().await,"ready":analysis.ready,"status":analysis.status}));
+            analyzers.push(json!({"language":language,"backend":server.name,"pid":server.pid().await,"ready":analysis.ready,"status":analysis.status}));
         }
         let state = self.state.lock().await;
         let analysis = self.lsp.state.read().await;

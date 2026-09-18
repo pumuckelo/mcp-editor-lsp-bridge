@@ -37,6 +37,28 @@ pub async fn write_message(writer: &mut (impl AsyncWrite + Unpin), value: &Value
     Ok(())
 }
 
+/// Incremental servers need an explicit range in the old document, even for a full replacement.
+pub fn document_change(old: &str, new: &str, incremental: bool) -> Value {
+    if !incremental {
+        return serde_json::json!({"text":new});
+    }
+    let mut line = 0;
+    let mut character = 0;
+    let mut chars = old.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\r' || ch == '\n' {
+            if ch == '\r' && chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+            line += 1;
+            character = 0;
+        } else {
+            character += ch.len_utf16();
+        }
+    }
+    serde_json::json!({"text":new,"range":{"start":{"line":0,"character":0},"end":{"line":line,"character":character}}})
+}
+
 // LSP positions are UTF-16 code units, not UTF-8 bytes or Unicode scalar counts.
 pub fn offset(text: &str, position: &Value) -> Result<usize> {
     let line = position["line"].as_u64().context("Missing line")? as usize;
@@ -99,6 +121,15 @@ mod tests {
     use serde_json::json;
     #[test]
     fn unicode_and_crlf() {
+        assert_eq!(
+            document_change("a\r\n😀", "", true)["range"]["end"],
+            json!({"line":1,"character":2})
+        );
+        assert_eq!(
+            document_change("a\n", "", true)["range"]["end"],
+            json!({"line":1,"character":0})
+        );
+        assert_eq!(document_change("", "x", false), json!({"text":"x"}));
         let text = "a😀b\r\n雪x";
         assert_eq!(offset(text, &json!({"line":0,"character":3})).unwrap(), 5);
         assert!(offset(text, &json!({"line":0,"character":2})).is_err());

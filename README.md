@@ -4,7 +4,7 @@
 
 Rust and TypeScript language intelligence for coding agents. Run one local core, then use the `bridge` CLI for navigation, diagnostics and cross-file refactoring. Agents share a language server per workspace.
 
-Supports **rust-analyzer** and the **native TypeScript 7 LSP**, including JavaScript. An optional Zed companion adds unsaved editor buffers.
+Supports **rust-analyzer** and **TypeScript through vtsls or typescript-language-server**, plus the **native TypeScript 7 LSP**, including JavaScript. An optional Zed companion adds unsaved editor buffers.
 
 ![Agent CLI → shared local core → Rust and TypeScript language servers](docs/assets/overview.svg)
 
@@ -21,7 +21,7 @@ Add `~/.local/bin` to your PATH. Run the same command to upgrade, then restart t
 Your projects also need their language server:
 
 - **Rust:** install your Rust toolchain and `rustup component add rust-analyzer`.
-- **TypeScript / JavaScript:** install native TypeScript 7 in the project, for example `npm install --save-dev typescript@^7`. Older TypeScript servers are not supported.
+- **TypeScript / JavaScript:** install the project's existing dependencies. For TypeScript 4–6, install `@vtsls/language-server` locally or globally (requires Node). TypeScript 7 uses its native LSP automatically. The bridge uses the project's TypeScript version; no upgrade is required.
 
 ## Quick start
 
@@ -139,11 +139,29 @@ Zed retains its own analyzer. The companion only forwards open/change/save/close
 
 Agent disk edits take precedence over stale companion overlays in the bridge. This does not overwrite Zed's unsaved buffer or force a save: discard conflicting old editor changes as usual. A later explicit save is a new disk write. Heartbeats detect an unclean companion disconnect and restore saved-file state.
 
+## Choose a TypeScript backend
+
+In a workspace's dashboard card, choose **TypeScript backend** beside the analyzer name and click **Apply**. You can also switch from the CLI:
+
+```sh
+bridge workspace-backend --backend vtsls
+bridge workspace-backend --backend typescript-language-server
+bridge workspace-backend --backend auto
+```
+
+Install `typescript-language-server` locally or globally to try the alternative. Both wrappers use the workspace's TypeScript SDK. **Auto** selects native LSP for TS7 and vtsls for TS4–6; **Native** requires TS7.
+
+Switching restarts the selected workspace and preserves editor buffers. If startup fails, the previous workspace stays running. Selection survives disconnect/reconnect until the core restarts. For a persistent default, pass a config file to `bridge serve --config bridge.json`:
+
+```json
+{ "typescript_backend": "vtsls" }
+```
+
 ## Configuration and troubleshooting
 
 Use `bridge serve --port PORT --config bridge.json` to customize startup, and `--endpoint http://127.0.0.1:PORT` on CLI commands for a different port.
 
-The configuration accepts `analyzer` (rust-analyzer path), `typescript_analyzer` (native TypeScript executable), `analyzer_settings`, `typescript_settings`, `cargo_features`, `all_features`, `no_default_features`, `cargo_target` and `environment`. Restart the core after changing it; Zed settings are separate.
+The configuration accepts `analyzer` (rust-analyzer path), `typescript_analyzer` (native TypeScript executable), `analyzer_settings`, `typescript_settings`, `vtsls_analyzer`, `vtsls_settings`, `typescript_language_server`, `typescript_language_server_settings`, `cargo_features`, `all_features`, `no_default_features`, `cargo_target` and `environment`. Restart the core after changing the config file; Zed settings are separate. `vtsls_settings` uses nested `typescript`, `javascript` and `vtsls` settings. `typescript_language_server_settings` contains that server’s initialization options. SDK paths are pinned to the workspace; saved-file checks always prefer its compiler.
 
 - **Connection refused:** start `bridge serve` at the expected endpoint.
 - **Operation not permitted:** the agent sandbox may block localhost. Use its permission flow to retry; starting another core will not help.

@@ -51,3 +51,9 @@ The full 11-test suite passed: six unit tests, two CLI transport tests, and real
 The running Rust bridge was used for semantic navigation, compiler diagnostics and a real cross-file helper rename during implementation. Closed-file snapshot differences are forwarded before requesting edits so delayed watcher events do not leave the server reading an old file.
 
 Refactor guards serialize bridge/editor events and reject observed changes. They do not claim a multi-file OS transaction against other processes; a final external write race or filesystem replacement failure remains possible and is documented.
+
+### Selectable TypeScript backends
+
+Real CLI tests with TypeScript 5.9.3 and 6.0.3 exercise vtsls, switching to typescript-language-server and back, cross-file rename with disk assertions, unsaved companion diagnostics, preservation of companion buffers across switches, saved-file checks, mixed Rust/TypeScript workspaces, and disconnect/reconnect. A rejected native backend on TS5 leaves the current analyzer running. The native TS7 integration remains covered separately. Incremental document changes now use an explicit UTF-16 range over the old text when requested by the server.
+
+To run the wrapper integration, set `BRIDGE_TYPESCRIPT_PACKAGE` to the TypeScript package directory, `BRIDGE_VTSLS` to the vtsls executable, and `BRIDGE_TSLS` to typescript-language-server, then run `cargo test --test typescript legacy_typescript_backends_and_switching -- --ignored`. These are test inputs, not production configuration.

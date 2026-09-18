@@ -1,6 +1,6 @@
 ---
 name: editor-lsp-bridge
-description: Install or adopt Editor LSP Bridge when requested; use its CLI for Rust and native TypeScript 7 navigation, refactoring, and diagnostics.
+description: Install or adopt Editor LSP Bridge when requested; use its CLI for Rust and TypeScript navigation, refactoring, and diagnostics.
 ---
 
 Read [references/setup.md](references/setup.md) **only** when the user requests installation or repository setup, or the CLI is missing. Do not read it for normal usage. A connection error alone does not mean installation is needed.
@@ -8,7 +8,7 @@ Read [references/setup.md](references/setup.md) **only** when the user requests 
 - Use `bridge` through the shell for Rust/TypeScript/JavaScript symbols, definitions, references, hover, rename, code actions and diagnostics. Commands connect to the shared running core and analyzer; do not launch a server per agent.
 - The CLI infers the workspace from cwd; override with `--workspace PATH`. Inspect readiness with `bridge workspace-status`; `--all` lists sessions from any directory.
 - Use `bridge workspace-disconnect` to stop a workspace analyzer/checks, and `bridge workspace-connect` to resume explicitly. A deliberately disconnected workspace rejects queries and companion reattachment until reconnected; respect that choice instead of reconnecting merely to probe readiness. These choices reset when the core restarts.
-- TypeScript requires a workspace-local TypeScript 7 installation, or a configured `typescript_analyzer`. No legacy server fallback. TS live diagnostics cover bridge-opened files; `--check` uses the root tsconfig/jsconfig for saved files. Mixed workspaces route by file extension and add servers as needed.
+- TypeScript uses the workspace’s installed version: Auto selects native LSP for TS7 and vtsls for TS4–6. Older projects need Node and @vtsls/language-server; do not upgrade their TypeScript. `bridge workspace-backend --backend vtsls|typescript-language-server|auto` switches a connected workspace when requested; the alternative wrapper must be installed. Config `typescript_backend` sets a persistent default. TS live diagnostics cover bridge-opened files; `--check` uses the root tsconfig/jsconfig for saved files. Mixed workspaces route by file extension and add servers as needed.
 - Discover only what you need: `bridge tools`, `bridge OPERATION --help`, or `bridge schema OPERATION`. Commands use hyphens, such as `document-symbols`. Complex inputs accept `--json` or piped `--stdin`.
 - For rename, definition, references and hover, prefer `--symbol NAME` when a declaration name is known. Ambiguous/not-found selections return `applied:false` and candidates; inspect that result and use exact positions if needed.
 - Positions are zero-based lines and UTF-16 characters. CLI `--path` is cwd-relative; JSON paths are workspace-relative, absolute, or file URIs.
