@@ -166,7 +166,7 @@ async fn client_infers_cargo_workspace_and_preserves_json_and_stdin() -> Result<
     );
     assert_eq!(
         explicit["arguments"],
-        json!({"workspace":root,"check":true,"verbose":null})
+        json!({"workspace":root,"check":true,"path":null,"verbose":null})
     );
     server.abort();
     let unavailable = cli(&cwd, &["diagnostics", "--endpoint", &endpoint], None).await?;

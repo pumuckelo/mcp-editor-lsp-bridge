@@ -136,7 +136,7 @@ async fn real_workspace_mcp_and_companion() -> Result<()> {
         )
         .await?;
     assert!(hover.to_string().contains("i64"));
-    let diagnostics = workspace.diagnostics(true).await?;
+    let diagnostics = workspace.diagnostics(true, None).await?;
     assert_eq!(
         diagnostics["savedFileCheck"]["success"], false,
         "{diagnostics}"
@@ -152,7 +152,7 @@ async fn real_workspace_mcp_and_companion() -> Result<()> {
         "pub fn result() -> i32 { 77 }\n",
     )?;
     workspace.disk_changed(&root.join("src/helper.rs")).await?;
-    let diagnostics = workspace.diagnostics(true).await?;
+    let diagnostics = workspace.diagnostics(true, None).await?;
     assert_eq!(
         diagnostics["savedFileCheck"]["success"], true,
         "{diagnostics}"

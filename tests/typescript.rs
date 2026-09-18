@@ -125,6 +125,14 @@ async fn exercise_typescript(
     )
     .await?;
     assert!(definition.to_string().contains("helper.ts"), "{definition}");
+    // Imported symbols are absent from the file's document outline; resolve them workspace-wide by name.
+    let imported = cli(
+        &root,
+        &endpoint,
+        &["definition", "--path", "src/main.ts", "--symbol", "greet"],
+    )
+    .await?;
+    assert!(imported.to_string().contains("helper.ts"), "{imported}");
     let references = cli(
         &root,
         &endpoint,
@@ -198,6 +206,21 @@ async fn exercise_typescript(
     assert!(symbols.to_string().contains("welcome"), "{symbols}");
     let checked = cli(&root, &endpoint, &["diagnostics", "--check"]).await?;
     assert_eq!(checked["savedFileCheck"]["success"], true, "{checked}");
+    // A path narrows live diagnostics to that document only.
+    let scoped = cli(
+        &root,
+        &endpoint,
+        &["diagnostics", "--path", "src/helper.ts"],
+    )
+    .await?;
+    assert!(
+        scoped["liveDiagnostics"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|uri| uri.ends_with("helper.ts")),
+        "{scoped}"
+    );
     let mut workspace = core.workspace(root.to_str().unwrap()).await?;
     // Real companion executable forwards TS buffers through exactly the editor transport.
     use mcp_editor_lsp_bridge::protocol::{read_message, write_message};
@@ -406,7 +429,7 @@ async fn exercise_typescript(
             .len(),
         2
     );
-    let checks = resumed.diagnostics(true).await?;
+    let checks = resumed.diagnostics(true, None).await?;
     assert_eq!(checks["savedFileCheck"]["success"], false, "{checks}");
     assert!(
         checks["savedFileCheck"]["diagnostics"]

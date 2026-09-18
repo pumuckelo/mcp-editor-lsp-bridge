@@ -10,7 +10,7 @@ use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -49,7 +49,7 @@ input!(PositionInput {
     character: Option<u32>,
     symbol: Option<String>
 });
-input!(DiagnosticsInput { workspace: String, check: Option<bool>, verbose: Option<bool> });
+input!(DiagnosticsInput { workspace: String, check: Option<bool>, path: Option<String>, verbose: Option<bool> });
 input!(RenameInput { workspace: String, path: String, line: Option<u32>, character: Option<u32>, symbol: Option<String>, new_name: String, apply: Option<bool>, preview: Option<bool>, verbose: Option<bool> });
 input!(PlanInput { workspace: String, plan_id: String, verbose: Option<bool> });
 input!(ActionsInput { workspace: String, path: String, line: u32, character: u32, end: Option<Position> });
@@ -93,7 +93,7 @@ operations! {
     Definition(PositionInput) => ("definition", "Find a symbol definition. Positions are zero-based UTF-16."),
     References(PositionInput) => ("references", "Find symbol references including declaration. Positions are zero-based UTF-16."),
     Hover(PositionInput) => ("hover", "Get type and documentation. Positions are zero-based UTF-16."),
-    Diagnostics(DiagnosticsInput) => ("diagnostics", "Get live diagnostics and saved-file check state. check=true awaits shared saved-file compiler checks. Empty live diagnostics alone never mean clean."),
+    Diagnostics(DiagnosticsInput) => ("diagnostics", "Get live diagnostics and saved-file check state. check=true awaits shared saved-file compiler checks. path scopes live diagnostics to one file; the compiler check stays workspace-wide. Empty live diagnostics alone never mean clean."),
     Rename(RenameInput) => ("rename", "Rename and write edits by default. preview=true returns a guarded plan; apply=false is a legacy preview alias. Select by symbol or zero-based UTF-16 position."),
     ApplyRename(PlanInput) => ("apply_rename", "Apply exactly an unexpired preview plan, rejecting stale files or editor buffers."),
     CodeActions(ActionsInput) => ("code_actions", "List code actions at a zero-based UTF-16 position/range. Use action_id with apply_code_action."),
@@ -198,7 +198,7 @@ impl Application {
                 self.core
                     .workspace(&input.workspace)
                     .await?
-                    .diagnostics(input.check.unwrap_or(false))
+                    .diagnostics(input.check.unwrap_or(false), input.path.as_deref())
                     .await?,
                 input.verbose.unwrap_or(false),
             )),
@@ -259,7 +259,7 @@ impl Application {
     ) -> Result<Value> {
         let workspace = self.core.workspace(&input.workspace).await?;
         let uri = workspace.open(&input.path).await?;
-        let _edit = workspace.edit_lock.lock().await;
+        // Resolve before locking: selecting an imported symbol opens its declaration document.
         let selection = select_position(
             &workspace,
             &uri,
@@ -268,10 +268,11 @@ impl Application {
             input.symbol.as_deref(),
         )
         .await?;
-        let position = match selection {
-            Selection::Position(position) => position,
+        let (uri, position) = match selection {
+            Selection::Position { uri, position } => (uri, position),
             Selection::Candidates(value) => return Ok(value),
         };
+        let _edit = workspace.edit_lock.lock().await;
         let mut params = json!({"textDocument":{"uri":uri},"position":position});
         if references {
             params["context"] = json!({"includeDeclaration":true});
@@ -427,7 +428,7 @@ impl Request {
     }
 }
 enum Selection {
-    Position(Value),
+    Position { uri: String, position: Value },
     Candidates(Value),
 }
 async fn select_position(
@@ -438,62 +439,130 @@ async fn select_position(
     symbol: Option<&str>,
 ) -> Result<Selection> {
     if let (Some(line), Some(character)) = (line, character) {
-        return Ok(Selection::Position(
-            json!({"line":line,"character":character}),
-        ));
+        return Ok(Selection::Position {
+            uri: uri.to_string(),
+            position: json!({"line":line,"character":character}),
+        });
     }
     let name = symbol.context("Missing symbol")?;
     let server = workspace.language_server(uri).await?;
+    // 1. Declared in this file: exact and local, no workspace index involved.
     let result = server
         .request(
             "textDocument/documentSymbol",
             json!({"textDocument":{"uri":uri}}),
         )
         .await?;
-    let matches: Vec<_> = symbols::flatten(&result, uri)
+    let mut declared: Vec<_> = symbols::flatten(&result, uri)
         .into_iter()
-        .filter(|s| s["name"] == name)
+        .filter(|item| item["name"] == name)
         .collect();
-    if matches.len() != 1 {
-        return Ok(Selection::Candidates(
-            json!({"applied":false,"reason":if matches.is_empty(){"symbol_not_found"}else{"ambiguous_symbol"},"symbol":name,"candidates":symbols::compact(matches)}),
-        ));
+    dedup_by_location(&mut declared);
+    if declared.len() > 1 {
+        return Ok(Selection::Candidates(symbol_selection(
+            name,
+            symbol_candidates(workspace, declared),
+        )));
     }
-    let item = &matches[0];
-    // Flat SymbolInformation may point at the whole declaration, not the identifier.
-    // Verify its returned start against source; never text-search and guess a declaration.
-    if item["exactSelection"] != true {
-        let text = workspace.document_text(uri).await?;
-        let position = json!({"line":item["line"],"character":item["character"]});
-        let start = crate::protocol::offset(&text, &position)?;
-        if !text[start..].starts_with(name) {
-            bail!(
-                "Server did not provide an exact symbol selection; use explicit line and character"
-            );
+    if let Some(item) = declared.first() {
+        // Flat SymbolInformation may point at the whole declaration, not the identifier.
+        // Verify its returned start against source; never text-search and guess a declaration.
+        if item["exactSelection"] != true {
+            let text = workspace.document_text(uri).await?;
+            let position = item_position(item);
+            let start = crate::protocol::offset(&text, &position)?;
+            if !text[start..].starts_with(name) {
+                bail!(
+                    "Server did not provide an exact symbol selection; use explicit line and character"
+                );
+            }
         }
+        return Ok(Selection::Position {
+            uri: uri.to_string(),
+            position: item_position(item),
+        });
     }
-    Ok(Selection::Position(
-        json!({"line":item["line"],"character":item["character"]}),
-    ))
+    // 2. Declared elsewhere and already present in the workspace symbol index.
+    let mut indexed: Vec<_> = symbols::flatten(&workspace.workspace_symbols(name).await?, "")
+        .into_iter()
+        .filter(|item| item["name"] == name)
+        .collect();
+    dedup_by_location(&mut indexed);
+    if indexed.len() > 1 {
+        return Ok(Selection::Candidates(symbol_selection(
+            name,
+            symbol_candidates(workspace, indexed),
+        )));
+    }
+    if let Some(item) = indexed.first() {
+        // The declaration lives in another file; open it so follow-up requests target that document.
+        let target = workspace
+            .open(item["uri"].as_str().context("Symbol has no URI")?)
+            .await?;
+        return Ok(Selection::Position {
+            uri: target,
+            position: item_position(item),
+        });
+    }
+    Ok(Selection::Candidates(symbol_selection(name, json!([]))))
+}
+fn item_position(item: &Value) -> Value {
+    json!({"line":item["line"],"character":item["character"]})
+}
+fn symbol_selection(name: &str, candidates: Value) -> Value {
+    json!({
+        "applied": false,
+        "reason": if candidates.as_array().is_some_and(Vec::is_empty) { "symbol_not_found" } else { "ambiguous_symbol" },
+        "symbol": name,
+        "candidates": candidates,
+    })
+}
+fn dedup_by_location(items: &mut Vec<Value>) {
+    let mut seen = HashSet::new();
+    items.retain(|item| {
+        seen.insert(format!(
+            "{}:{}:{}",
+            item["uri"], item["line"], item["character"]
+        ))
+    });
+}
+fn symbol_candidates(workspace: &Workspace, items: Vec<Value>) -> Value {
+    json!(
+        items
+            .into_iter()
+            .map(|item| {
+                let path = item["uri"]
+                    .as_str()
+                    .and_then(|uri| workspace.path(uri).ok())
+                    .and_then(|path| {
+                        path.strip_prefix(&workspace.root)
+                            .ok()
+                            .map(|relative| relative.to_string_lossy().into_owned())
+                    });
+                json!({"name":item["name"],"kind":item["kind"],"container":item["container"],"line":item["line"],"character":item["character"],"path":path})
+            })
+            .collect::<Vec<_>>()
+    )
 }
 impl Application {
     async fn rename(&self, input: RenameInput) -> Result<Value> {
         let workspace = self.core.workspace(&input.workspace).await?;
-        let uri = workspace.open(&input.path).await?;
-        let _edit = workspace.edit_lock.lock().await;
-        let snapshot = workspace.snapshot().await?;
-        let position = match select_position(
+        let source_uri = workspace.open(&input.path).await?;
+        // Resolve before locking: selecting an imported symbol opens its declaration document.
+        let selection = select_position(
             &workspace,
-            &uri,
+            &source_uri,
             input.line,
             input.character,
             input.symbol.as_deref(),
         )
-        .await?
-        {
-            Selection::Position(position) => position,
+        .await?;
+        let (uri, position) = match selection {
+            Selection::Position { uri, position } => (uri, position),
             Selection::Candidates(value) => return Ok(value),
         };
+        let _edit = workspace.edit_lock.lock().await;
+        let snapshot = workspace.snapshot().await?;
         let server = workspace.language_server(&uri).await?;
         let mut symbol = input.symbol;
         if server.capabilities.read().await["renameProvider"]["prepareProvider"] == true {

@@ -577,8 +577,14 @@ impl Workspace {
         let documents: Vec<_> = state.documents.iter().map(|(uri,doc)| json!({"uri":uri,"source":doc.source,"version":doc.version,"epoch":doc.epoch})).collect();
         json!({"workspace":self.root,"language":self.language,"analyzers":analyzers,"analyzerPid":self.lsp.pid().await,"ready":analyzers.iter().all(|a| a["ready"] == true),"status":analysis.status,"companion":state.companion,"generation":state.generation,"check":state.check,"checkFresh":state.check.generation == Some(state.generation) && !state.check.running && state.watcher_error.is_none(),"documents":documents,"config":self.public_config(),"watcherError":state.watcher_error})
     }
-    pub async fn diagnostics(&self, check: bool) -> Result<Value> {
+    pub async fn diagnostics(&self, check: bool, path: Option<&str>) -> Result<Value> {
         self.ensure_running()?;
+        // A path narrows live diagnostics to one document and pulls only that document.
+        // The saved-file compiler check stays workspace-wide; a project check cannot be scoped per file.
+        let target = match path {
+            Some(path) => Some(self.open(path).await?),
+            None => None,
+        };
         if check {
             self.check().await?;
         }
@@ -588,6 +594,11 @@ impl Workspace {
             .await
             .documents
             .iter()
+            .filter(|(uri, _)| {
+                target
+                    .as_deref()
+                    .is_none_or(|target| target == uri.as_str())
+            })
             .map(|(uri, doc)| (uri.clone(), doc.version))
             .collect();
         for (uri, version) in documents {
@@ -616,6 +627,11 @@ impl Workspace {
         let analysis = self.lsp.state.read().await;
         let live: BTreeMap<_, _> = diagnostics
             .iter()
+            .filter(|(uri, _)| {
+                target
+                    .as_deref()
+                    .is_none_or(|target| target == uri.as_str())
+            })
             .map(|(uri, params)| {
                 let mut value = params.clone();
                 value["matchesDocumentVersion"] = json!(
